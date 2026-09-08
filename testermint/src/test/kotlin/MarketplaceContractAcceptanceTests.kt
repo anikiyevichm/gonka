@@ -10,6 +10,7 @@ import com.productscience.data.RestrictionsParams
 import com.productscience.data.RestrictionsState
 import com.productscience.data.TokenomicsParams
 import com.productscience.data.UpdateRestrictionsParams
+import com.productscience.data.UnfundedInferenceParticipant
 import com.productscience.data.spec
 import com.productscience.inferenceConfig
 import com.productscience.initCluster
@@ -49,6 +50,8 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
 
         val participant = cluster.joinPairs.first()
         val absentSummaryParticipant = cluster.joinPairs[1]
+        val lockEPlus4Participant = createInactiveParticipant(genesis, "a8-lock-e-plus-4")
+        val lockEPlus5Participant = createInactiveParticipant(genesis, "a8-lock-e-plus-5")
         val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
 
         logSection("Deploy Marketplace, configure exact Deal recipient, and fund CW20")
@@ -63,12 +66,19 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
         )
 
-        val noSaleEpoch = targetEpoch + 1
+        val routingMissingEpoch = targetEpoch + 1
         val gasEpoch = targetEpoch + 2
+        val noSaleEpoch = gasEpoch
         val expiryEpoch = targetEpoch + 3
         val emergencyEpoch = targetEpoch + 4
         prepareDeal("no-sale", noSaleEpoch, funded = false)
-        prepareDeal("gas-claimed", gasEpoch, funded = true)
+        prepareDeal(
+            "gas-claimed",
+            gasEpoch,
+            funded = true,
+            hostNode = "genesis-node",
+            hostKey = "genesis",
+        )
         prepareDeal("claim-expiry", expiryEpoch, funded = true)
         prepareDeal(
             "no-buyer-expired",
@@ -97,7 +107,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         )
         prepareDeal(
             "routing-missing",
-            noSaleEpoch,
+            routingMissingEpoch,
             funded = true,
             hostNode = "genesis-node",
             hostKey = "genesis",
@@ -113,14 +123,14 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             gasEpoch,
             funded = false,
             hostNode = "genesis-node",
-            hostKey = "genesis",
+            hostKey = lockEPlus4Participant,
         )
         prepareDeal(
             "lock-e-plus-5",
             gasEpoch,
             funded = false,
-            hostNode = "join2-node",
-            hostKey = "join2",
+            hostNode = "genesis-node",
+            hostKey = lockEPlus5Participant,
         )
         // The Host must exist when the native routing row is configured. Stop
         // its off-chain API afterwards so the future epoch has no reward
@@ -158,8 +168,6 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--fault-retry",
         )
 
-        runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-sale")
-
         participant.restartApiContainer()
         genesis.node.waitForNextBlock(2)
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
@@ -184,6 +192,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             genesis.waitForNextEpoch()
         }
         genesis.node.waitForNextBlock(2)
+        runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-sale")
         runHarness(
             "verify-claimed-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
@@ -420,6 +429,21 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             .getAsJsonObject("contracts")
             .get("deal")
             .asString
+    }
+
+    private fun createInactiveParticipant(genesis: com.productscience.LocalInferencePair, prefix: String): String {
+        val key = genesis.node.createKey("$prefix-${System.currentTimeMillis()}")
+        genesis.api.addUnfundedInferenceParticipant(
+            UnfundedInferenceParticipant(
+                url = "",
+                models = listOf(),
+                validatorKey = "",
+                pubKey = key.pubkey.key,
+                address = key.address,
+            ),
+        )
+        genesis.node.waitForNextBlock(2)
+        return key.name
     }
 
     private fun requiredEnv(name: String): String =
