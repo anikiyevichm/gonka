@@ -164,10 +164,24 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
 
         participant.restartApiContainer()
         genesis.node.waitForNextBlock(2)
-        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
-        val noSaleSeed = participant.api.getConfig().previousSeed
+        var noSaleConfig = participant.api.getConfig()
+        while (noSaleConfig.currentSeed.epochIndex < noSaleEpoch) {
+            genesis.node.waitForNextBlock(1)
+            noSaleConfig = participant.api.getConfig()
+        }
+        val noSaleSeed = noSaleConfig.currentSeed
         check(noSaleSeed.epochIndex == noSaleEpoch) {
-            "Testermint previous seed epoch ${noSaleSeed.epochIndex} != no-sale epoch $noSaleEpoch"
+            "Testermint skipped no-sale seed epoch: current=${noSaleSeed.epochIndex}, expected=$noSaleEpoch"
+        }
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
+        var gasConfig = participant.api.getConfig()
+        while (gasConfig.currentSeed.epochIndex < gasEpoch) {
+            genesis.node.waitForNextBlock(1)
+            gasConfig = participant.api.getConfig()
+        }
+        val gasSeed = gasConfig.currentSeed
+        check(gasSeed.epochIndex == gasEpoch) {
+            "Testermint skipped gas seed epoch: current=${gasSeed.epochIndex}, expected=$gasEpoch"
         }
         participant.stopApiContainer()
         runHarness(
@@ -214,10 +228,6 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         participant.restartApiContainer()
         genesis.node.waitForNextBlock(2)
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
-        val gasSeed = participant.api.getConfig().previousSeed
-        check(gasSeed.epochIndex == gasEpoch) {
-            "Testermint previous seed epoch ${gasSeed.epochIndex} != gas epoch $gasEpoch"
-        }
         participant.stopApiContainer()
         logSection("Advance to $expiryEpoch: complete funded Deal and claim gas-regression Deal")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
