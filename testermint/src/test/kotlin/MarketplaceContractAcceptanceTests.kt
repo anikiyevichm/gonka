@@ -9,6 +9,7 @@ import com.productscience.data.MsgTransferWithVesting
 import com.productscience.data.RestrictionsParams
 import com.productscience.data.RestrictionsState
 import com.productscience.data.TokenomicsParams
+import com.productscience.data.UpdateRestrictionsParams
 import com.productscience.data.spec
 import com.productscience.inferenceConfig
 import com.productscience.initCluster
@@ -136,14 +137,9 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--fault-cw20",
         )
 
-        val seedConfig = participant.api.getConfig()
-        val rewardSeed = seedConfig.currentSeed
-        val noSaleSeed = seedConfig.upcomingSeed
+        val rewardSeed = participant.api.getConfig().currentSeed
         check(rewardSeed.epochIndex == targetEpoch) {
             "Testermint reward seed epoch ${rewardSeed.epochIndex} != Deal epoch $targetEpoch"
-        }
-        check(noSaleSeed.epochIndex == noSaleEpoch) {
-            "Testermint upcoming seed epoch ${noSaleSeed.epochIndex} != no-sale epoch $noSaleEpoch"
         }
         participant.stopApiContainer()
         logSection("Auto-claim stopped; wait for native claim window")
@@ -158,6 +154,15 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         )
 
         runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-sale")
+
+        participant.restartApiContainer()
+        genesis.node.waitForNextBlock(2)
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
+        val noSaleSeed = participant.api.getConfig().currentSeed
+        check(noSaleSeed.epochIndex == noSaleEpoch) {
+            "Testermint current seed epoch ${noSaleSeed.epochIndex} != no-sale epoch $noSaleEpoch"
+        }
+        participant.stopApiContainer()
         runHarness(
             "refund-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
@@ -165,13 +170,6 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--expect", "success",
             "--reason", "routing_missing",
         )
-
-        participant.restartApiContainer()
-        genesis.node.waitForNextBlock(2)
-        val gasSeed = participant.api.getConfig().upcomingSeed
-        check(gasSeed.epochIndex == gasEpoch)
-        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
-        participant.stopApiContainer()
 
         logSection("Advance to $gasEpoch: first funded unlock and no-sale native claim")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
@@ -209,6 +207,10 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         participant.restartApiContainer()
         genesis.node.waitForNextBlock(2)
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
+        val gasSeed = participant.api.getConfig().currentSeed
+        check(gasSeed.epochIndex == gasEpoch) {
+            "Testermint current seed epoch ${gasSeed.epochIndex} != gas epoch $gasEpoch"
+        }
         participant.stopApiContainer()
         logSection("Advance to $expiryEpoch: complete funded Deal and claim gas-regression Deal")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
@@ -319,11 +321,49 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--reason", "network_unconfirmed",
         )
         runHarness(
+            "donate-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "network-unconfirmed",
+            "--label", "after_terminal_emergency_refund",
+            "--amount", "11",
+        )
+        val restrictionStatus = genesis.node.queryRestrictionsStatus()
+        val restrictionEndBlock = restrictionStatus.currentBlockHeight + 50
+        val restrictionProposalId = genesis.runProposal(
+            cluster,
+            UpdateRestrictionsParams(
+                params = RestrictionsParams(
+                    restrictionEndBlock = restrictionEndBlock,
+                    emergencyTransferExemptions = emptyList(),
+                    exemptionUsageTracking = emptyList(),
+                ),
+            ),
+        )
+        check(genesis.node.queryRestrictionsStatus().isActive) {
+            "transfer restrictions did not become active after proposal $restrictionProposalId"
+        }
+        runHarness(
+            "bank-release-rollback-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "network-unconfirmed",
+            "--proposal-id", restrictionProposalId,
+        )
+        genesis.node.waitForMinimumBlock(restrictionEndBlock + 1, "A8 restriction expiry")
+        check(!genesis.node.queryRestrictionsStatus().isActive) {
+            "transfer restrictions remained active after block $restrictionEndBlock"
+        }
+        runHarness(
+            "release-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "network-unconfirmed",
+        )
+        runHarness(
             "lock-rejected-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "lock-e-plus-5",
             "--routing", "pruned",
         )
+        runHarness("verify-factory-isolation", "--context", requiredEnv("A8_CONTEXT"))
     }
 
     private fun runHarness(vararg args: String) {
