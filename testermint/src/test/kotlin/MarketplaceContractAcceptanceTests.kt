@@ -180,6 +180,10 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--name", "no-sale",
             "--require-positive",
         )
+        while (genesis.getEpochData().latestEpoch.index < gasEpoch) {
+            genesis.waitForNextEpoch()
+        }
+        genesis.node.waitForNextBlock(2)
         runHarness(
             "verify-claimed-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
