@@ -420,11 +420,13 @@ data class LocalInferencePair(
     }
 
     fun restartApiContainer() {
-        val apiContainer = getRawContainers(config).getApi(name)
-            ?: error("API container not found for $name")
+        // listContainersCmd() hides stopped containers by default. Resolve the
+        // exact sibling with showAll=true so this method can restart an API
+        // previously stopped by stopApiContainer().
+        val apiContainerId = siblingContainerId("api")
         DockerClientBuilder.getInstance().build().use { dockerClient ->
             Logger.warn("Restarting API container for {}", name)
-            dockerClient.restartContainerCmd(apiContainer.id).exec()
+            dockerClient.restartContainerCmd(apiContainerId).exec()
         }
     }
 
