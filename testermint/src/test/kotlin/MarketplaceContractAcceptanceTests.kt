@@ -70,6 +70,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         prepareDeal("no-sale", noSaleEpoch, funded = false)
         prepareDeal("gas-claimed", gasEpoch, funded = true)
         prepareDeal("claim-expiry", expiryEpoch, funded = true)
+        prepareDeal("no-buyer-expired", expiryEpoch, funded = false)
         prepareDeal(
             "network-unconfirmed",
             emergencyEpoch,
@@ -255,6 +256,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         )
         runHarness("late-donation", "--context", requiredEnv("A8_CONTEXT"))
         runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "claim-expiry")
+        runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-buyer-expired")
         runHarness(
             "claim-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
@@ -279,6 +281,13 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--expect", "failure",
             "--reason", "too_early",
         )
+        runHarness(
+            "refund-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "no-buyer-expired",
+            "--expect", "failure",
+            "--reason", "too_early",
+        )
 
         logSection("Advance to E+2 claim-expiry and E+3 gas boundary")
         genesis.waitForNextEpoch()
@@ -286,6 +295,13 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "refund-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "claim-expiry",
+            "--expect", "success",
+            "--reason", "claim_expiry",
+        )
+        runHarness(
+            "refund-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "no-buyer-expired",
             "--expect", "success",
             "--reason", "claim_expiry",
         )
