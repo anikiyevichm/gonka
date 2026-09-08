@@ -69,7 +69,9 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         val routingMissingEpoch = targetEpoch + 1
         val gasEpoch = targetEpoch + 2
         val noSaleEpoch = gasEpoch
-        val expiryEpoch = targetEpoch + 3
+        // Claim-expiry is prepared at E so its E+1/E+2 boundaries can be
+        // exercised before the long settlement/vesting sequence advances time.
+        val expiryEpoch = targetEpoch
         val emergencyEpoch = targetEpoch + 4
         prepareDeal("no-sale", noSaleEpoch, funded = false)
         prepareDeal(
@@ -144,6 +146,11 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         }
         runHarness("lock", "--context", requiredEnv("A8_CONTEXT"))
         runHarness(
+            "lock-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry",
+        )
+        runHarness(
             "refund-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "routing-mismatch",
@@ -152,11 +159,33 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--fault-cw20",
         )
 
+        runHarness(
+            "verify-unclaimed-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry",
+        )
         val rewardSeed = participant.api.getConfig().currentSeed
         check(rewardSeed.epochIndex == targetEpoch) {
             "Testermint reward seed epoch ${rewardSeed.epochIndex} != Deal epoch $targetEpoch"
         }
         participant.stopApiContainer()
+        runHarness(
+            "refund-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry",
+            "--expect", "failure",
+            "--reason", "too_early",
+        )
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 2) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness(
+            "refund-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry",
+            "--expect", "success",
+            "--reason", "claim_expiry",
+        )
         logSection("Auto-claim stopped; wait for native claim window")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
 
@@ -259,15 +288,11 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--label", "after_settlement",
             "--amount", "2",
         )
-        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
-        participant.stopApiContainer()
-        logSection("Advance to $expiryEpoch: complete funded Deal and claim gas-regression Deal")
+        logSection("Complete funded Deal and claim gas-regression Deal")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
         genesis.node.waitForNextBlock(2)
         runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-sale")
         runHarness("late-donation", "--context", requiredEnv("A8_CONTEXT"))
-        runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "claim-expiry")
-
         logSection("Advance to $emergencyEpoch: finish no-sale vesting and lock absent-summary Deal")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
         genesis.node.waitForNextBlock(2)
@@ -282,23 +307,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "no-buyer-expired",
         )
-        runHarness(
-            "refund-scenario",
-            "--context", requiredEnv("A8_CONTEXT"),
-            "--name", "claim-expiry",
-            "--expect", "failure",
-            "--reason", "too_early",
-        )
-
-        logSection("Advance to E+2 claim-expiry and E+3 gas boundary")
-        genesis.waitForNextEpoch()
-        runHarness(
-            "refund-scenario",
-            "--context", requiredEnv("A8_CONTEXT"),
-            "--name", "claim-expiry",
-            "--expect", "success",
-            "--reason", "claim_expiry",
-        )
+        logSection("Continue at absolute E+3 gas boundary")
         runHarness(
             "gas-sweep-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
