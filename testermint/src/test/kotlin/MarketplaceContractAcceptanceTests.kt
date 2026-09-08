@@ -215,19 +215,6 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--amount", "7",
         )
         runHarness("settle-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-sale")
-        runHarness(
-            "donate-scenario",
-            "--context", requiredEnv("A8_CONTEXT"),
-            "--name", "no-sale",
-            "--label", "after_settlement",
-            "--amount", "2",
-        )
-        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
-        participant.stopApiContainer()
-        logSection("Advance to $expiryEpoch: complete funded Deal and claim gas-regression Deal")
-        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
-        genesis.node.waitForNextBlock(2)
-        runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-sale")
         val vestingDonation = 10_000_000_001L
         val governanceAddress = genesis.node.getModuleAccount("gov").account.value.address
         val genesisAddress = genesis.node.getColdAddress()
@@ -244,6 +231,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "no-sale",
             "--label", "before-additional-vesting",
+            "--require-non-empty",
         )
         val vestingProposalId = genesis.runProposal(
             cluster,
@@ -264,6 +252,19 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--fund-tx-hash", vestingFundingTx.txhash,
             "--proposal-id", vestingProposalId,
         )
+        runHarness(
+            "donate-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "no-sale",
+            "--label", "after_settlement",
+            "--amount", "2",
+        )
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
+        participant.stopApiContainer()
+        logSection("Advance to $expiryEpoch: complete funded Deal and claim gas-regression Deal")
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        genesis.node.waitForNextBlock(2)
+        runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-sale")
         runHarness("late-donation", "--context", requiredEnv("A8_CONTEXT"))
         runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "claim-expiry")
 
