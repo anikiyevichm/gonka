@@ -72,10 +72,8 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         prepareDeal("claim-expiry", expiryEpoch, funded = true)
         prepareDeal(
             "no-buyer-expired",
-            expiryEpoch,
+            emergencyEpoch,
             funded = false,
-            hostNode = "genesis-node",
-            hostKey = "genesis",
         )
         prepareDeal(
             "network-unconfirmed",
@@ -164,26 +162,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
 
         participant.restartApiContainer()
         genesis.node.waitForNextBlock(2)
-        var noSaleConfig = participant.api.getConfig()
-        while (noSaleConfig.currentSeed.epochIndex < noSaleEpoch) {
-            genesis.node.waitForNextBlock(1)
-            noSaleConfig = participant.api.getConfig()
-        }
-        val noSaleSeed = noSaleConfig.currentSeed
-        check(noSaleSeed.epochIndex == noSaleEpoch) {
-            "Testermint skipped no-sale seed epoch: current=${noSaleSeed.epochIndex}, expected=$noSaleEpoch"
-        }
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
-        var gasConfig = participant.api.getConfig()
-        while (gasConfig.currentSeed.epochIndex < gasEpoch) {
-            genesis.node.waitForNextBlock(1)
-            gasConfig = participant.api.getConfig()
-        }
-        val gasSeed = gasConfig.currentSeed
-        check(gasSeed.epochIndex == gasEpoch) {
-            "Testermint skipped gas seed epoch: current=${gasSeed.epochIndex}, expected=$gasEpoch"
-        }
-        participant.stopApiContainer()
         runHarness(
             "refund-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
@@ -195,6 +174,18 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         logSection("Advance to $gasEpoch: first funded unlock and no-sale native claim")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
         genesis.node.waitForNextBlock(2)
+        runHarness(
+            "verify-claimed-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "no-sale",
+            "--require-positive",
+        )
+        runHarness(
+            "verify-claimed-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "gas-claimed",
+            "--require-positive",
+        )
         runHarness("release", "--context", requiredEnv("A8_CONTEXT"))
         runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "gas-claimed")
         runHarness(
@@ -210,13 +201,6 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--name", "no-sale",
             "--amount", "7",
         )
-        runHarness(
-            "claim-scenario",
-            "--context", requiredEnv("A8_CONTEXT"),
-            "--name", "no-sale",
-            "--reward-seed", noSaleSeed.seed.toString(),
-            "--reward-epoch", noSaleSeed.epochIndex.toString(),
-        )
         runHarness("settle-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-sale")
         runHarness(
             "donate-scenario",
@@ -225,8 +209,6 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--label", "after_settlement",
             "--amount", "2",
         )
-        participant.restartApiContainer()
-        genesis.node.waitForNextBlock(2)
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
         participant.stopApiContainer()
         logSection("Advance to $expiryEpoch: complete funded Deal and claim gas-regression Deal")
@@ -272,14 +254,6 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         )
         runHarness("late-donation", "--context", requiredEnv("A8_CONTEXT"))
         runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "claim-expiry")
-        runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-buyer-expired")
-        runHarness(
-            "claim-scenario",
-            "--context", requiredEnv("A8_CONTEXT"),
-            "--name", "gas-claimed",
-            "--reward-seed", gasSeed.seed.toString(),
-            "--reward-epoch", gasSeed.epochIndex.toString(),
-        )
 
         logSection("Advance to $emergencyEpoch: finish no-sale vesting and lock absent-summary Deal")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
@@ -291,16 +265,14 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--name", "network-unconfirmed",
         )
         runHarness(
-            "refund-scenario",
+            "lock-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
-            "--name", "claim-expiry",
-            "--expect", "failure",
-            "--reason", "too_early",
+            "--name", "no-buyer-expired",
         )
         runHarness(
             "refund-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
-            "--name", "no-buyer-expired",
+            "--name", "claim-expiry",
             "--expect", "failure",
             "--reason", "too_early",
         )
@@ -311,13 +283,6 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "refund-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "claim-expiry",
-            "--expect", "success",
-            "--reason", "claim_expiry",
-        )
-        runHarness(
-            "refund-scenario",
-            "--context", requiredEnv("A8_CONTEXT"),
-            "--name", "no-buyer-expired",
             "--expect", "success",
             "--reason", "claim_expiry",
         )
@@ -338,6 +303,13 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--reason", "too_early",
         )
         runHarness(
+            "refund-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "no-buyer-expired",
+            "--expect", "failure",
+            "--reason", "too_early",
+        )
+        runHarness(
             "lock-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "lock-e-plus-4",
@@ -349,6 +321,13 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "refund-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "network-unconfirmed",
+            "--expect", "success",
+            "--reason", "network_unconfirmed",
+        )
+        runHarness(
+            "refund-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "no-buyer-expired",
             "--expect", "success",
             "--reason", "network_unconfirmed",
         )
