@@ -80,10 +80,15 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--reward-epoch", rewardSeed.epochIndex.toString(),
         )
 
-        logSection("Wait for the first supported vesting unlock predicate")
-        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
-        genesis.node.waitForNextBlock(2)
-        runHarness("release", "--context", requiredEnv("A8_CONTEXT"))
+        repeat(2) { tranche ->
+            logSection("Wait for vesting unlock tranche ${tranche + 1}/2")
+            genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+            genesis.node.waitForNextBlock(2)
+            runHarness("release", "--context", requiredEnv("A8_CONTEXT"))
+        }
+
+        logSection("Release a liquid donation received after Completed")
+        runHarness("late-donation", "--context", requiredEnv("A8_CONTEXT"))
     }
 
     private fun runHarness(vararg args: String) {
