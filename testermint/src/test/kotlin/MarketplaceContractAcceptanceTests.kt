@@ -3,6 +3,8 @@ import com.productscience.data.AppState
 import com.productscience.data.EpochParams
 import com.productscience.data.InferenceParams
 import com.productscience.data.InferenceState
+import com.productscience.data.RestrictionsParams
+import com.productscience.data.RestrictionsState
 import com.productscience.data.TokenomicsParams
 import com.productscience.data.spec
 import com.productscience.inferenceConfig
@@ -27,6 +29,11 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
                     this[InferenceParams::epochParams] = spec<EpochParams> {
                         this[EpochParams::epochLength] = 25L
                     }
+                }
+            }
+            this[AppState::restrictions] = spec<RestrictionsState> {
+                this[RestrictionsState::params] = spec<RestrictionsParams> {
+                    this[RestrictionsParams::restrictionEndBlock] = 0L
                 }
             }
         }
