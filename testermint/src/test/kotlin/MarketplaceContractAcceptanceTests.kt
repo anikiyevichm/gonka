@@ -1,8 +1,11 @@
+import com.google.gson.JsonParser
 import com.productscience.EpochStage
+import com.productscience.data.Coin
 import com.productscience.data.AppState
 import com.productscience.data.EpochParams
 import com.productscience.data.InferenceParams
 import com.productscience.data.InferenceState
+import com.productscience.data.MsgTransferWithVesting
 import com.productscience.data.RestrictionsParams
 import com.productscience.data.RestrictionsState
 import com.productscience.data.TokenomicsParams
@@ -130,6 +133,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--name", "routing-mismatch",
             "--expect", "success",
             "--reason", "routing_mismatch",
+            "--fault-cw20",
         )
 
         val seedConfig = participant.api.getConfig()
@@ -150,6 +154,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--context", requiredEnv("A8_CONTEXT"),
             "--reward-seed", rewardSeed.seed.toString(),
             "--reward-epoch", rewardSeed.epochIndex.toString(),
+            "--fault-retry",
         )
 
         runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-sale")
@@ -210,6 +215,42 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         genesis.node.waitForNextBlock(2)
         runHarness("release", "--context", requiredEnv("A8_CONTEXT"))
         runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-sale")
+        val vestingDonation = 10_000_000_001L
+        val governanceAddress = genesis.node.getModuleAccount("gov").account.value.address
+        val genesisAddress = genesis.node.getColdAddress()
+        genesis.ensureGenesisSpendableForDevshard(vestingDonation)
+        val vestingFundingTx = genesis.submitTransaction(
+            listOf(
+                "bank", "send", genesisAddress, governanceAddress,
+                "$vestingDonation${genesis.config.denom}",
+            )
+        )
+        check(vestingFundingTx.code == 0) { "governance funding failed: ${vestingFundingTx.rawLog}" }
+        runHarness(
+            "snapshot-vesting-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "no-sale",
+            "--label", "before-additional-vesting",
+        )
+        val vestingProposalId = genesis.runProposal(
+            cluster,
+            MsgTransferWithVesting(
+                sender = governanceAddress,
+                recipient = scenarioDeal("no-sale"),
+                amount = listOf(Coin(genesis.config.denom, vestingDonation)),
+                vestingEpochs = 2,
+            ),
+        )
+        runHarness(
+            "verify-vesting-addition-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "no-sale",
+            "--before-label", "before-additional-vesting",
+            "--amount", vestingDonation.toString(),
+            "--vesting-epochs", "2",
+            "--fund-tx-hash", vestingFundingTx.txhash,
+            "--proposal-id", vestingProposalId,
+        )
         runHarness("late-donation", "--context", requiredEnv("A8_CONTEXT"))
         runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "claim-expiry")
         runHarness(
@@ -251,6 +292,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "gas-claimed",
         )
+        runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-sale")
 
         logSection("Advance to emergency E+2: unavailable summary must still fail closed")
         genesis.waitForNextEpoch()
@@ -314,6 +356,15 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         )
         if (funded) args += "--fund"
         runHarness(*args.toTypedArray())
+    }
+
+    private fun scenarioDeal(name: String): String {
+        val root = JsonParser.parseString(File(requiredEnv("A8_CONTEXT")).readText()).asJsonObject
+        return root.getAsJsonObject("scenarios")
+            .getAsJsonObject(name)
+            .getAsJsonObject("contracts")
+            .get("deal")
+            .asString
     }
 
     private fun requiredEnv(name: String): String =
