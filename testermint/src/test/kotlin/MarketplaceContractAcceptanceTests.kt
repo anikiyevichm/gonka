@@ -70,7 +70,13 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         prepareDeal("no-sale", noSaleEpoch, funded = false)
         prepareDeal("gas-claimed", gasEpoch, funded = true)
         prepareDeal("claim-expiry", expiryEpoch, funded = true)
-        prepareDeal("no-buyer-expired", expiryEpoch, funded = false)
+        prepareDeal(
+            "no-buyer-expired",
+            expiryEpoch,
+            funded = false,
+            hostNode = "genesis-node",
+            hostKey = "genesis",
+        )
         prepareDeal(
             "network-unconfirmed",
             emergencyEpoch,
