@@ -81,7 +81,17 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             hostNode = "genesis-node",
             hostKey = "genesis",
         )
-        prepareDeal("claim-expiry", expiryEpoch, funded = true)
+        // Bootstrap already occupies the default join1/E pair. Use the live
+        // genesis participant for the unclaimed claim-expiry fixture so the
+        // authoritative native summary remains available after join2 is
+        // stopped for the NetworkUnconfirmed scenario.
+        prepareDeal(
+            "claim-expiry",
+            expiryEpoch,
+            funded = true,
+            hostNode = "genesis-node",
+            hostKey = "genesis",
+        )
         prepareDeal(
             "no-buyer-expired",
             emergencyEpoch,
