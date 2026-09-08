@@ -227,7 +227,6 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         logSection("Advance to $expiryEpoch: complete funded Deal and claim gas-regression Deal")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
         genesis.node.waitForNextBlock(2)
-        runHarness("release", "--context", requiredEnv("A8_CONTEXT"))
         runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "no-sale")
         val vestingDonation = 10_000_000_001L
         val governanceAddress = genesis.node.getModuleAccount("gov").account.value.address
