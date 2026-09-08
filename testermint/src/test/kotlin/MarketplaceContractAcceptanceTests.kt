@@ -44,6 +44,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
 
         val participant = cluster.joinPairs.first()
+        val absentSummaryParticipant = cluster.joinPairs[1]
         val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
 
         logSection("Deploy Marketplace, configure exact Deal recipient, and fund CW20")
@@ -69,8 +70,8 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "network-unconfirmed",
             emergencyEpoch,
             funded = true,
-            hostNode = "genesis-node",
-            hostKey = "a8-inactive-${requiredEnv("A8_RUN_ID")}",
+            hostNode = "join2-node",
+            hostKey = "join2",
         )
         prepareDeal(
             "routing-mismatch",
@@ -112,6 +113,11 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             hostNode = "join2-node",
             hostKey = "join2",
         )
+        // The Host must exist when the native routing row is configured. Stop
+        // its off-chain API afterwards so the future epoch has no reward
+        // summary and exercises the real NetworkUnconfirmed path.
+        genesis.markNeedsReboot()
+        absentSummaryParticipant.stopApiContainer()
 
         logSection("Wait for target epoch $targetEpoch and lock the exact routing proof")
         while (genesis.getEpochData().latestEpoch.index < targetEpoch) {
@@ -135,7 +141,6 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         check(noSaleSeed.epochIndex == noSaleEpoch) {
             "Testermint upcoming seed epoch ${noSaleSeed.epochIndex} != no-sale epoch $noSaleEpoch"
         }
-        genesis.markNeedsReboot()
         participant.stopApiContainer()
         logSection("Auto-claim stopped; wait for native claim window")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
