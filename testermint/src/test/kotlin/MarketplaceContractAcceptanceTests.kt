@@ -165,9 +165,9 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         participant.restartApiContainer()
         genesis.node.waitForNextBlock(2)
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
-        val noSaleSeed = participant.api.getConfig().currentSeed
+        val noSaleSeed = participant.api.getConfig().previousSeed
         check(noSaleSeed.epochIndex == noSaleEpoch) {
-            "Testermint current seed epoch ${noSaleSeed.epochIndex} != no-sale epoch $noSaleEpoch"
+            "Testermint previous seed epoch ${noSaleSeed.epochIndex} != no-sale epoch $noSaleEpoch"
         }
         participant.stopApiContainer()
         runHarness(
@@ -214,9 +214,9 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         participant.restartApiContainer()
         genesis.node.waitForNextBlock(2)
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
-        val gasSeed = participant.api.getConfig().currentSeed
+        val gasSeed = participant.api.getConfig().previousSeed
         check(gasSeed.epochIndex == gasEpoch) {
-            "Testermint current seed epoch ${gasSeed.epochIndex} != gas epoch $gasEpoch"
+            "Testermint previous seed epoch ${gasSeed.epochIndex} != gas epoch $gasEpoch"
         }
         participant.stopApiContainer()
         logSection("Advance to $expiryEpoch: complete funded Deal and claim gas-regression Deal")
