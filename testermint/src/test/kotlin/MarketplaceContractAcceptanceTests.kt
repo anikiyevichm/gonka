@@ -93,18 +93,13 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
 
     private fun runHarness(vararg args: String) {
         val command = listOf(requiredEnv("A8_PYTHON"), requiredEnv("A8_HARNESS")) + args
-        val process = ProcessBuilder(command)
-            .directory(File(requiredEnv("A8_MARKETPLACE_DIR")))
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader().use { it.readText() }
-        check(process.waitFor(8, TimeUnit.MINUTES)) {
-            process.destroyForcibly()
-            "Marketplace harness timed out: ${args.firstOrNull()}"
-        }
-        check(process.exitValue() == 0) {
-            "Marketplace harness failed (${args.firstOrNull()}):\n$output"
-        }
+        val output = runMarketplaceHarnessProcess(
+            command = command,
+            directory = File(requiredEnv("A8_MARKETPLACE_DIR")),
+            phase = args.firstOrNull(),
+            timeout = 8,
+            timeoutUnit = TimeUnit.MINUTES,
+        )
         println(output.trim())
     }
 
