@@ -342,7 +342,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "no-buyer-expired",
             "--expect", "success",
-            "--reason", "network_unconfirmed",
+            "--reason", "claim_expiry",
         )
         runHarness(
             "donate-scenario",
