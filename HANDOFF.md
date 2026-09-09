@@ -4,7 +4,7 @@ Status: **PREPARED** (not a live PASS).
 
 Base Marketplace SHA: `6b5df7fbdebdc7504a86a9be2c5631288f132f60`.
 Base Gonka SHA: `bbde35c87757d7519962d67424f16b5613f1fc36`.
-Prepared Marketplace code HEAD: `9890b511f2ddda8cb27215d8b3a5b8f8518e2f31`.
+Prepared Marketplace code HEAD: `4eb43037d7ce74cc8386fdc43fec1ab169cad699`.
 Prepared Gonka code HEAD: `710bd8de51d811311725f7416baca24dbd821146`.
 
 Changed file: `testermint/src/test/kotlin/MarketplaceContractAcceptanceTests.kt`.
