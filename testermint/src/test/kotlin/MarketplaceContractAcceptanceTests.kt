@@ -283,6 +283,64 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
     }
 
     @Test
+    fun `marketplace terminal release repeat is a native no-op`() {
+        val config = fastMarketplaceConfig()
+        val (cluster, genesis) = initCluster(config = config, reboot = true)
+        cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
+
+        val participant = cluster.joinPairs.first()
+        val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
+
+        logSection("Deploy one funded G3 Deal with independent financial roles")
+        runHarness(
+            "bootstrap",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--run-id", requiredEnv("A8_RUN_ID"),
+            "--target-epoch", targetEpoch.toString(),
+            "--deal-wasm", requiredEnv("A8_DEAL_WASM"),
+            "--factory-wasm", requiredEnv("A8_FACTORY_WASM"),
+            "--cw20-wasm", requiredEnv("A8_CW20_WASM"),
+            "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
+        )
+
+        genesis.markNeedsReboot()
+        logSection("Reach E=$targetEpoch and lock the exact native recipient")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness("lock", "--context", requiredEnv("A8_CONTEXT"))
+        val rewardSeed = participant.api.getConfig().currentSeed
+        check(rewardSeed.epochIndex == targetEpoch) {
+            "Testermint reward seed epoch ${rewardSeed.epochIndex} != Deal epoch $targetEpoch"
+        }
+
+        participant.stopApiContainer()
+        logSection("Claim the positive native reward and settle the funded Deal")
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        runHarness(
+            "claim-settle",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--reward-seed", rewardSeed.seed.toString(),
+            "--reward-epoch", rewardSeed.epochIndex.toString(),
+        )
+
+        participant.restartApiContainer()
+        genesis.node.waitForNextBlock(2)
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
+        logSection("Wait for both native vesting tranches and release through Completed")
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        genesis.node.waitForNextBlock(2)
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 2) {
+            genesis.waitForNextEpoch()
+        }
+        genesis.node.waitForNextBlock(2)
+        runHarness("release", "--context", requiredEnv("A8_CONTEXT"))
+
+        logSection("Broadcast a real zero-balance ReleaseUnlockedGnk from an independent caller")
+        runHarness("terminal-release-repeat", "--context", requiredEnv("A8_CONTEXT"))
+    }
+
+    @Test
     fun `marketplace funded claim settles and releases on real Gonka`() {
         val config = fastMarketplaceConfig()
         val (cluster, genesis) = initCluster(config = config, reboot = true)
