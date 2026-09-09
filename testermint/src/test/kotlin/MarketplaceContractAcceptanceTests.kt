@@ -917,20 +917,27 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         check(genesis.node.queryRestrictionsStatus().isActive) {
             "transfer restrictions did not become active after proposal $restrictionProposalId"
         }
+        val networkScenario = JsonParser.parseString(File(requiredEnv("A8_CONTEXT")).readText())
+            .asJsonObject["scenarios"].asJsonObject["network-unconfirmed"].asJsonObject
+        val networkHost = networkScenario["accounts"].asJsonObject["host"].asString
         runHarness(
             "bank-release-rollback-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "network-unconfirmed",
             "--proposal-id", restrictionProposalId,
+            "--expected-send-index", "1",
+            "--rejected-recipient", networkHost,
         )
         genesis.node.waitForMinimumBlock(restrictionEndBlock + 1, "A8 restriction expiry")
         check(!genesis.node.queryRestrictionsStatus().isActive) {
             "transfer restrictions remained active after block $restrictionEndBlock"
         }
         runHarness(
-            "release-scenario",
+            "bank-release-retry-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "network-unconfirmed",
+            "--expected-send-index", "1",
+            "--rejected-recipient", networkHost,
         )
         runHarness(
             "lock-rejected-scenario",

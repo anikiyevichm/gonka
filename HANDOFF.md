@@ -16,6 +16,13 @@ no matching exemption and fails. It rejects aliased recipients and zero amounts.
 send. Both plans are default-off: they do nothing until an integration test
 passes their params through the existing Testermint governance update path.
 
+`MarketplaceContractAcceptanceTests` now wires the existing NetworkUnconfirmed
+HostOnly sequence to the Marketplace `bank-release-rollback-scenario` and then
+`bank-release-retry-scenario`: one selected fault phase, restriction expiry,
+oracle-checked retry, and terminal no-double-payout phase are retained under the
+same scenario evidence. It reads only the already-written A8 context to bind the
+expected Host recipient; it does not modify runtime state or summary faults.
+
 No Docker/Testermint/E2E/Actions were run and no production runtime file changed.
 `./gradlew compileTestKotlin` was attempted from `testermint` but did not start:
 this host has no `JAVA_HOME` and no `java` on `PATH`; no global toolchain was
