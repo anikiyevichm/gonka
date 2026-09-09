@@ -748,12 +748,6 @@ data class DockerGroup(
         val mappingsSourceDir = baseDir.resolve("testermint/src/main/resources/mappings")
         val publicHtmlDir = baseDir.resolve("public-html")
 
-        // The cleanup intentionally removes the whole ignored directory. On
-        // Windows bind mounts, create the root separately before nested paths.
-        val prodLocalRoot = baseDir.resolve("prod-local")
-        if (!Files.isDirectory(prodLocalRoot)) {
-            Files.createDirectories(prodLocalRoot)
-        }
         // The checkout may be a Windows bind mount. Create the bind-mounted
         // parents through Docker first; Java NIO can otherwise report
         // NoSuchFileException after the root-owned prod-local cleanup.
