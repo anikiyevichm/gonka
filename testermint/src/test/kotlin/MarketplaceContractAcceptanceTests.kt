@@ -569,11 +569,17 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         logSection("Advance to emergency E+2: unavailable summary must still fail closed")
         genesis.waitForNextEpoch()
         runHarness(
+            "verify-missing-summary-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "network-unconfirmed",
+            "--expected-offset", "2",
+        )
+        runHarness(
             "refund-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "network-unconfirmed",
             "--expect", "failure",
-            "--reason", "too_early",
+            "--reason", "network_unconfirmed_too_early",
         )
         runHarness(
             "refund-scenario",
@@ -590,6 +596,12 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
 
         logSection("Advance to emergency E+3 and recipient pruning boundary E+5")
         genesis.waitForNextEpoch()
+        runHarness(
+            "verify-missing-summary-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "network-unconfirmed",
+            "--expected-offset", "3",
+        )
         runHarness(
             "refund-scenario",
             "--context", requiredEnv("A8_CONTEXT"),

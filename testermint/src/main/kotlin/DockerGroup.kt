@@ -23,6 +23,7 @@ import kotlin.io.path.exists
 const val GENESIS_KEY_NAME = "genesis"
 
 private const val VERSIOND_COMPOSE_FILE = "docker-compose.versiond.yml"
+private const val TESTERMINT_NATS_BIND_COMPOSE_FILE = "prod-local/docker-compose.testermint-nats-bind.yml"
 
 /**
  * Docker platform for versiond + devshardd override binaries.
@@ -160,17 +161,21 @@ data class DockerGroup(
 ) {
     val warmKeyName = "$pairName-WARM"
     val coldKeyName = pairName
-    val composeFiles = when (isGenesis) {
-        true -> GENESIS_COMPOSE_FILES
-        false -> NODE_COMPOSE_FILES
-    }.let { baseFiles: List<String> ->
-        val additionalFiles = config.additionalDockerFilesByKeyName[pairName] ?: emptyList()
-        baseFiles + additionalFiles.map { "$LOCAL_TEST_NET_DIR/$it" }
-    }.onEach { file: String ->
-        if (!Path.of(workingDirectory, file).exists()) {
-            error("A docker file doesn't exist: $file")
+    val composeFiles: List<String>
+        get() {
+            val baseFiles = if (isGenesis) GENESIS_COMPOSE_FILES else NODE_COMPOSE_FILES
+            val additionalFiles = config.additionalDockerFilesByKeyName[pairName] ?: emptyList()
+            val overlay = Path.of(workingDirectory, TESTERMINT_NATS_BIND_COMPOSE_FILE)
+            return (
+                baseFiles +
+                    additionalFiles.map { "$LOCAL_TEST_NET_DIR/$it" } +
+                    if (overlay.exists()) listOf(TESTERMINT_NATS_BIND_COMPOSE_FILE) else emptyList()
+                ).onEach { file: String ->
+                    if (!Path.of(workingDirectory, file).exists()) {
+                        error("A docker file doesn't exist: $file")
+                    }
+                }
         }
-    }
 
     fun dockerProcess(vararg args: String): ProcessBuilder {
         val envMap = this.getCommonEnvMap(useSnapshots)
@@ -747,7 +752,8 @@ data class DockerGroup(
                         "mkdir -p prod-local/genesis prod-local/join1 prod-local/join2 " +
                         "prod-local/mock-server/genesis/mappings prod-local/mock-server/genesis/__files " +
                         "prod-local/mock-server/join1/mappings prod-local/mock-server/join1/__files " +
-                        "prod-local/mock-server/join2/mappings prod-local/mock-server/join2/__files" +
+                        "prod-local/mock-server/join2/mappings prod-local/mock-server/join2/__files " +
+                        "prod-local/nats/genesis prod-local/nats/join1 prod-local/nats/join2" +
                         restoreOwnership,
                 ))
                 val cleanupProcess = ProcessBuilder(cleanupCommand)
@@ -774,6 +780,7 @@ data class DockerGroup(
         }
 
         val inferenceDir = baseDir.resolve("prod-local/$pairName")
+        val natsDir = baseDir.resolve("prod-local/nats/$pairName")
         val mappingsDir = baseDir.resolve("prod-local/mock-server/$pairName/mappings")
         val filesDir = baseDir.resolve("prod-local/mock-server/$pairName/__files")
         val mappingsSourceDir = baseDir.resolve("testermint/src/main/resources/mappings")
@@ -787,9 +794,11 @@ data class DockerGroup(
                 mappingsDir.toFile().mkdirs()
                 filesDir.toFile().mkdirs()
                 inferenceDir.toFile().mkdirs()
+                natsDir.toFile().mkdirs()
                 Files.createDirectories(mappingsDir)
                 Files.createDirectories(filesDir)
                 Files.createDirectories(inferenceDir)
+                Files.createDirectories(natsDir)
                 prepared = true
                 return@repeat
             } catch (_: NoSuchFileException) {
@@ -799,6 +808,15 @@ data class DockerGroup(
             }
         }
         check(prepared) { "cannot prepare prod-local directories: $mappingsDir" }
+        Files.writeString(
+            baseDir.resolve(TESTERMINT_NATS_BIND_COMPOSE_FILE),
+            """
+            services:
+              api:
+                volumes:
+                  - ./prod-local/nats/${'$'}{KEY_NAME}:/root/.nats
+            """.trimIndent() + "\n",
+        )
         mappingsSourceDir.copyToRecursively(mappingsDir, overwrite = true, followLinks = false)
 
         val templatePath = "testermint/src/main/resources/alternative-mappings/validate_poc_batch.template.json"
