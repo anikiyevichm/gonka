@@ -323,10 +323,18 @@ data class DockerGroup(
                 pairName,
                 joinServices.joinToString(),
             )
-            val stackExit = runComposeLogged(
+            var stackExit = runComposeLogged(
                 "join-inference-stack-up",
                 *startRemainingArgs.toTypedArray(),
             )
+            if (stackExit != 0 || !dockerContainerRunning("$pairName-api")) {
+                Logger.warn("[{}] join stack start failed; retrying once after DNS/compose settling", pairName)
+                Thread.sleep(Duration.ofSeconds(5))
+                stackExit = runComposeLogged(
+                    "join-inference-stack-up-retry",
+                    *startRemainingArgs.toTypedArray(),
+                )
+            }
             logComposeProjectState("after-inference-stack-up")
             logInferenceStackContainers(pairName, "after-inference-stack-up")
             val apiContainer = "$pairName-api"
