@@ -72,17 +72,17 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "claim-expiry-positive",
         )
+
+        logSection("At E+1 the settled summary must be positive and Refund must fail closed")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 1) {
+            genesis.waitForNextEpoch()
+        }
         runHarness(
             "verify-unclaimed-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "claim-expiry-positive",
             "--require-positive",
         )
-
-        logSection("At E+1 Refund must fail closed without changing the Deal")
-        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 1) {
-            genesis.waitForNextEpoch()
-        }
         runHarness(
             "refund-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
