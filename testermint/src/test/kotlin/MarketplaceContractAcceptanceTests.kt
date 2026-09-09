@@ -504,6 +504,111 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
     }
 
     @Test
+    fun `marketplace R7 dot 1 rejects selected second Bank send then retries once`() {
+        val config = fastMarketplaceConfig()
+        val (cluster, genesis) = initCluster(config = config, reboot = true)
+        cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
+        val participant = cluster.joinPairs.first()
+        val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
+
+        runHarness(
+            "bootstrap", "--context", requiredEnv("A8_CONTEXT"), "--run-id", requiredEnv("A8_RUN_ID"),
+            "--target-epoch", targetEpoch.toString(), "--deal-wasm", requiredEnv("A8_DEAL_WASM"),
+            "--factory-wasm", requiredEnv("A8_FACTORY_WASM"), "--cw20-wasm", requiredEnv("A8_CW20_WASM"),
+            "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
+        )
+        genesis.markNeedsReboot()
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch) genesis.waitForNextEpoch()
+        runHarness("lock", "--context", requiredEnv("A8_CONTEXT"))
+        val rewardSeed = participant.api.getConfig().currentSeed
+        check(rewardSeed.epochIndex == targetEpoch)
+        participant.stopApiContainer()
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        runHarness(
+            "claim-settle", "--context", requiredEnv("A8_CONTEXT"),
+            "--reward-seed", rewardSeed.seed.toString(), "--reward-epoch", rewardSeed.epochIndex.toString(),
+        )
+        participant.restartApiContainer()
+        genesis.node.waitForNextBlock(2)
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        genesis.node.waitForNextBlock(2)
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 2) genesis.waitForNextEpoch()
+        genesis.node.waitForNextBlock(2)
+
+        runHarness("bank-release-fault-plan", "--context", requiredEnv("A8_CONTEXT"), "--name", "bootstrap")
+        val phases = JsonParser.parseString(File(requiredEnv("A8_CONTEXT")).readText())
+            .asJsonObject["phases"].asJsonArray
+        val plan = phases.last { it.asJsonObject["name"].asString == "native_bank_release_fault_plan" }
+            .asJsonObject["plan"].asJsonObject
+        val restrictionEndBlock = genesis.node.queryRestrictionsStatus().currentBlockHeight + 50
+        val firstProposalId = genesis.runProposal(
+            cluster,
+            UpdateRestrictionsParams(
+                params = RestrictionsParams(
+                    restrictionEndBlock = restrictionEndBlock,
+                    emergencyTransferExemptions = emptyList(),
+                    exemptionUsageTracking = emptyList(),
+                )
+            ),
+        )
+        check(genesis.node.queryRestrictionsStatus().isActive)
+        runHarness(
+            "bank-release-rollback-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "bootstrap",
+            "--proposal-id", firstProposalId, "--expected-send-index", "1",
+            "--rejected-recipient", plan["buyer"].asString,
+        )
+        val restrictions = a8BankSendFaultPlan(
+            restrictionEndBlock, plan["deal"].asString, plan["buyer"].asString, plan["host"].asString,
+            plan["buyer_amount"].asLong, plan["host_amount"].asLong, "a8-r7-1-buyer-first",
+        )
+        val proposalId = genesis.runProposal(cluster, UpdateRestrictionsParams(params = restrictions.params))
+        check(genesis.node.queryRestrictionsStatus().isActive)
+        runHarness(
+            "bank-release-rollback-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "bootstrap",
+            "--proposal-id", proposalId, "--expected-send-index", "2",
+            "--allowed-earlier-recipient", restrictions.allowedEarlierRecipient!!,
+            "--rejected-recipient", restrictions.rejectedRecipient,
+            "--exemption-id", "a8-r7-1-buyer-first",
+        )
+        genesis.node.waitForMinimumBlock(restrictionEndBlock + 1, "A8 R7.1 restriction expiry")
+        check(!genesis.node.queryRestrictionsStatus().isActive)
+        runHarness(
+            "bank-release-retry-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "bootstrap",
+            "--expected-send-index", "2", "--rejected-recipient", restrictions.rejectedRecipient,
+        )
+    }
+
+    @Test
+    fun `marketplace R6 dot 1 rejects all three selected CW20 sends then settles once`() {
+        val config = fastMarketplaceConfig()
+        val (cluster, genesis) = initCluster(config = config, reboot = true)
+        cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
+        val participant = cluster.joinPairs.first()
+        val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
+        // Price below the observed positive reward makes Host net, fee, and
+        // Buyer refund all non-zero; the Python oracle rejects another shape.
+        runHarness(
+            "bootstrap", "--context", requiredEnv("A8_CONTEXT"), "--run-id", requiredEnv("A8_RUN_ID"),
+            "--target-epoch", targetEpoch.toString(), "--price", "1000",
+            "--deal-wasm", requiredEnv("A8_DEAL_WASM"), "--factory-wasm", requiredEnv("A8_FACTORY_WASM"),
+            "--cw20-wasm", requiredEnv("A8_CW20_WASM"), "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
+        )
+        genesis.markNeedsReboot()
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch) genesis.waitForNextEpoch()
+        runHarness("lock", "--context", requiredEnv("A8_CONTEXT"))
+        val rewardSeed = participant.api.getConfig().currentSeed
+        check(rewardSeed.epochIndex == targetEpoch)
+        participant.stopApiContainer()
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        runHarness(
+            "claim-settle", "--context", requiredEnv("A8_CONTEXT"),
+            "--reward-seed", rewardSeed.seed.toString(), "--reward-epoch", rewardSeed.epochIndex.toString(),
+            "--cw20-fault-positions", "1,2,3",
+        )
+    }
+
+    @Test
     fun `marketplace late liquid donations after Completed use cumulative GNK rounding`() {
         val config = fastMarketplaceConfig()
         val (cluster, genesis) = initCluster(config = config, reboot = true)
@@ -988,20 +1093,27 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         check(genesis.node.queryRestrictionsStatus().isActive) {
             "transfer restrictions did not become active after proposal $restrictionProposalId"
         }
+        val networkScenario = JsonParser.parseString(File(requiredEnv("A8_CONTEXT")).readText())
+            .asJsonObject["scenarios"].asJsonObject["network-unconfirmed"].asJsonObject
+        val networkHost = networkScenario["accounts"].asJsonObject["host"].asString
         runHarness(
             "bank-release-rollback-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "network-unconfirmed",
             "--proposal-id", restrictionProposalId,
+            "--expected-send-index", "1",
+            "--rejected-recipient", networkHost,
         )
         genesis.node.waitForMinimumBlock(restrictionEndBlock + 1, "A8 restriction expiry")
         check(!genesis.node.queryRestrictionsStatus().isActive) {
             "transfer restrictions remained active after block $restrictionEndBlock"
         }
         runHarness(
-            "release-scenario",
+            "bank-release-retry-scenario",
             "--context", requiredEnv("A8_CONTEXT"),
             "--name", "network-unconfirmed",
+            "--expected-send-index", "1",
+            "--rejected-recipient", networkHost,
         )
         runHarness(
             "lock-rejected-scenario",
