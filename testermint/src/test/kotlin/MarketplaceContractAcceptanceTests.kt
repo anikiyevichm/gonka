@@ -28,6 +28,77 @@ import java.util.concurrent.TimeUnit
 @Timeout(value = 35, unit = TimeUnit.MINUTES)
 class MarketplaceContractAcceptanceTests : TestermintTest() {
     @Test
+    fun `marketplace package A preserves R1 refund boundary and releases a new vested gift`() {
+        // One cluster is intentional: R1 and R2 get independent Host/E and Deal
+        // fixtures, but share a monotonic epoch schedule and one bootstrap.
+        val config = fastMarketplaceConfig()
+        val (cluster, genesis) = initCluster(config = config, reboot = true)
+        cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
+        val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
+        // bootstrap owns join1/targetEpoch; R2 deliberately uses the next
+        // epoch, so its Factory (Host,E) key cannot collide with bootstrap.
+        val r2Epoch = targetEpoch + 1
+        val r1HostKey = createInactiveParticipant(genesis, "a8-package-a-r1")
+
+        runHarness(
+            "bootstrap", "--context", requiredEnv("A8_CONTEXT"), "--run-id", requiredEnv("A8_RUN_ID"),
+            "--target-epoch", targetEpoch.toString(), "--deal-wasm", requiredEnv("A8_DEAL_WASM"),
+            "--factory-wasm", requiredEnv("A8_FACTORY_WASM"), "--cw20-wasm", requiredEnv("A8_CW20_WASM"),
+            "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
+        )
+        prepareDeal("r1-refund-e-plus-5", targetEpoch, funded = true, hostNode = "genesis-node", hostKey = r1HostKey)
+        prepareDeal("r2-vested-gift", r2Epoch, funded = true, hostNode = "join1-node", hostKey = "join1")
+        genesis.markNeedsReboot()
+
+        while (genesis.getEpochData().latestEpoch.index < r2Epoch) genesis.waitForNextEpoch()
+        runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift")
+        val rewardSeed = cluster.joinPairs.first().api.getConfig().currentSeed
+        check(rewardSeed.epochIndex == r2Epoch) { "R2 reward seed epoch must equal its Deal epoch" }
+        cluster.joinPairs.first().stopApiContainer()
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        runHarness("claim-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--reward-seed", rewardSeed.seed.toString(), "--reward-epoch", rewardSeed.epochIndex.toString())
+        runHarness("settle-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift")
+        cluster.joinPairs.first().restartApiContainer()
+
+        // Two original native tranches complete R2 before any new gift is made.
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        genesis.node.waitForNextBlock(2)
+        runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift")
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        genesis.node.waitForNextBlock(2)
+        runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift")
+        runHarness("r2-gift-checkpoint", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--stage", "pre_gift")
+
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 5) genesis.waitForNextEpoch()
+        // Isolated case evidence is written before a failed assertion is surfaced.
+        val r1 = runCatching {
+            runHarness("refund-e-plus-5-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r1-refund-e-plus-5", "--gas", "2000000")
+        }
+
+        val gift = 10_000_000_001L
+        runHarness("snapshot-vesting-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--label", "before-gift")
+        val governanceAddress = genesis.node.getModuleAccount("gov").account.value.address
+        val genesisAddress = genesis.node.getColdAddress()
+        genesis.ensureGenesisSpendableForDevshard(gift)
+        val fundingTx = genesis.submitTransaction(listOf("bank", "send", genesisAddress, governanceAddress, "$gift${genesis.config.denom}"))
+        check(fundingTx.code == 0) { "R2 governance funding failed: ${fundingTx.rawLog}" }
+        val proposalId = genesis.runProposal(cluster, MsgTransferWithVesting(
+            sender = governanceAddress, recipient = scenarioDeal("r2-vested-gift"),
+            amount = listOf(Coin(genesis.config.denom, gift)), vestingEpochs = 2,
+        ))
+        runHarness("verify-vesting-addition-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--before-label", "before-gift", "--amount", gift.toString(), "--vesting-epochs", "2", "--fund-tx-hash", fundingTx.txhash, "--proposal-id", proposalId, "--allow-empty-before")
+        runHarness("r2-gift-checkpoint", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--stage", "fully_locked", "--gift-amount", gift.toString())
+        genesis.waitForNextEpoch()
+        runHarness("r2-gift-checkpoint", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--stage", "first_unlocked", "--gift-amount", gift.toString())
+        runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift")
+        genesis.waitForNextEpoch()
+        runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift")
+        runHarness("r2-gift-checkpoint", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--stage", "final", "--gift-amount", gift.toString())
+        r1.getOrThrow()
+    }
+
+    @Test
     fun `marketplace funded lock succeeds exactly at E plus 4`() {
         val config = fastMarketplaceConfig()
         val (cluster, genesis) = initCluster(config = config, reboot = true)
