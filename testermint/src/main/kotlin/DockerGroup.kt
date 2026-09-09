@@ -748,6 +748,18 @@ data class DockerGroup(
         val mappingsSourceDir = baseDir.resolve("testermint/src/main/resources/mappings")
         val publicHtmlDir = baseDir.resolve("public-html")
 
+        // The checkout may be a Windows bind mount. Create the bind-mounted
+        // parents through Docker first; Java NIO can otherwise report
+        // NoSuchFileException after the root-owned prod-local cleanup.
+        val prepareDirs = ProcessBuilder(
+            "docker", "run", "--rm",
+            "-v", "${baseDir.toAbsolutePath()}:/workdir",
+            "-w", "/workdir",
+            "alpine:3.19",
+            "sh", "-c",
+            "mkdir -p prod-local/mock-server/$pairName/mappings prod-local/mock-server/$pairName/__files prod-local/$pairName",
+        ).directory(baseDir.toFile()).inheritIO().start()
+        check(prepareDirs.waitFor() == 0) { "failed to prepare prod-local directories" }
         Files.createDirectories(mappingsDir)
         Files.createDirectories(filesDir)
         Files.createDirectories(inferenceDir)
