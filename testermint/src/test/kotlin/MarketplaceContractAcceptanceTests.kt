@@ -66,6 +66,47 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
     }
 
     @Test
+    fun `marketplace funded lock rejects exactly at E plus 5`() {
+        val config = fastMarketplaceConfig()
+        val (cluster, genesis) = initCluster(config = config, reboot = true)
+        cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
+
+        val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
+        // A dedicated native Host avoids the bootstrap join1/E fixture pair.
+        val hostKey = createInactiveParticipant(genesis, "a8-lock-e-plus-5")
+        runHarness(
+            "bootstrap",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--run-id", requiredEnv("A8_RUN_ID"),
+            "--target-epoch", targetEpoch.toString(),
+            "--deal-wasm", requiredEnv("A8_DEAL_WASM"),
+            "--factory-wasm", requiredEnv("A8_FACTORY_WASM"),
+            "--cw20-wasm", requiredEnv("A8_CW20_WASM"),
+            "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
+        )
+        // Host, Buyer, and genesis (the fee-paying Lock caller) are distinct.
+        prepareDeal(
+            "lock-e-plus-5",
+            targetEpoch,
+            funded = true,
+            hostNode = "genesis-node",
+            hostKey = hostKey,
+        )
+
+        genesis.markNeedsReboot()
+        logSection("Leave the funded Deal unlocked until its exact E+5 boundary")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 5) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness(
+            "lock-e-plus-5-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "lock-e-plus-5",
+            "--gas", "2000000",
+        )
+    }
+
+    @Test
     fun `marketplace zero unclaimed summary refunds only at claim expiry`() {
         // This is a special test-network genesis setting, not a production default.
         // Native Params.Validate accepts uint64 zero, and the unchanged settlement
