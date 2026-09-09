@@ -23,6 +23,13 @@ oracle-checked retry, and terminal no-double-payout phase are retained under the
 same scenario evidence. It reads only the already-written A8 context to bind the
 expected Host recipient; it does not modify runtime state or summary faults.
 
+It also contains a focused R7.1 scenario: one bootstrap Deal reaches a
+proportional release; the Marketplace oracle records actual Buyer-first and
+Host-second amounts; the Kotlin test applies only the exact `Deal -> Buyer`
+exemption, proves send #2 rollback, waits for restriction expiry, and invokes
+the same selected-Deal retry/repeat route. No global restriction is presented
+as proof of send #2.
+
 No Docker/Testermint/E2E/Actions were run and no production runtime file changed.
 `./gradlew compileTestKotlin` was attempted from `testermint` but did not start:
 this host has no `JAVA_HOME` and no `java` on `PATH`; no global toolchain was
