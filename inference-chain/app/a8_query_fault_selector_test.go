@@ -144,7 +144,12 @@ func a8SummaryFaultDecorator(
 		case a8Oversized:
 			return bytes.Repeat([]byte{0}, a8MarketplaceMaxGrpcResponseBytes+1), nil
 		case a8MissingNested:
-			return proto.Marshal(&types.QueryEpochPerformanceSummaryByParticipantResponse{})
+			// Gonka's generated response stores this message as a non-pointer
+			// value and always marshals field 1, even when it is empty (0a00).
+			// Rust prost reads 0a00 as Some(default), not None. An empty
+			// protobuf response is the valid wire representation with field 1
+			// genuinely absent.
+			return []byte{}, nil
 		case a8WrongHost:
 			return proto.Marshal(&types.QueryEpochPerformanceSummaryByParticipantResponse{
 				EpochPerformanceSummary: types.EpochPerformanceSummary{
@@ -323,6 +328,9 @@ func TestA8SummaryFaultDecoratorProducesOnlyItsDeclaredLayer(t *testing.T) {
 			}
 			if kind == a8BadProto {
 				require.Equal(t, []byte{0xff}, response)
+			}
+			if kind == a8MissingNested {
+				require.Empty(t, response, "field 1 must be absent, not a 0a00 empty nested message")
 			}
 		})
 	}
