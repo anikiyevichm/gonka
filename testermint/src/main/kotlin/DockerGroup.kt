@@ -76,6 +76,7 @@ val DNS_COMPOSE_FILES = listOf(DNS_SERVER_COMPOSE_FILE, DNS_OVERRIDES_COMPOSE_FI
 /** Separate from genesis/join so pair `compose down` does not kill CoreDNS between tests. */
 private const val SHARED_DNS_PROJECT = "testdns"
 private const val TEST_DNS_IPV4 = "172.25.0.10"
+private val FILE_SETUP_LOCK = Any()
 val BASE_COMPOSE_FILES = listOf(
     "${LOCAL_TEST_NET_DIR}/docker-compose-base.yml",
 )
@@ -709,6 +710,7 @@ data class DockerGroup(
     @OptIn(ExperimentalPathApi::class)
     private fun setupFiles() {
         val baseDir = Path.of(workingDirectory)
+        synchronized(FILE_SETUP_LOCK) {
         if (isGenesis) {
             val prodLocal = baseDir.resolve("prod-local")
             try {
@@ -777,6 +779,7 @@ data class DockerGroup(
         val jsonOverrides = config.genesisSpec?.toJson(cosmosJson)?.let { "{ \"app_state\": $it }" } ?: "{}"
         Files.writeString(inferenceDir.resolve("genesis_overrides.json"), jsonOverrides, StandardOpenOption.CREATE)
         Logger.info("Setup files for keyName={}", pairName)
+        }
     }
 
     init {
