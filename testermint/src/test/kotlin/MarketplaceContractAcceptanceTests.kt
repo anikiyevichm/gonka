@@ -336,6 +336,11 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         genesis.node.waitForNextBlock(2)
         runHarness("release", "--context", requiredEnv("A8_CONTEXT"))
 
+        logSection("Unlock and release the second native tranche through Completed")
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        genesis.node.waitForNextBlock(2)
+        runHarness("release", "--context", requiredEnv("A8_CONTEXT"))
+
         logSection("Broadcast a real zero-balance ReleaseUnlockedGnk from an independent caller")
         runHarness("terminal-release-repeat", "--context", requiredEnv("A8_CONTEXT"))
     }
