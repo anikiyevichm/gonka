@@ -23,28 +23,96 @@ import java.util.concurrent.TimeUnit
 @Timeout(value = 35, unit = TimeUnit.MINUTES)
 class MarketplaceContractAcceptanceTests : TestermintTest() {
     @Test
-    fun `marketplace funded claim settles and releases on real Gonka`() {
-        val fastSpec = spec {
-            this[AppState::inference] = spec<InferenceState> {
-                this[InferenceState::params] = spec<InferenceParams> {
-                    this[InferenceParams::tokenomicsParams] = spec<TokenomicsParams> {
-                        this[TokenomicsParams::workVestingPeriod] = 2L
-                        this[TokenomicsParams::rewardVestingPeriod] = 2L
-                    }
-                    this[InferenceParams::epochParams] = spec<EpochParams> {
-                        this[EpochParams::epochLength] = 25L
-                    }
-                }
-            }
-            this[AppState::restrictions] = spec<RestrictionsState> {
-                this[RestrictionsState::params] = spec<RestrictionsParams> {
-                    this[RestrictionsParams::restrictionEndBlock] = 0L
-                }
-            }
-        }
-        val config = inferenceConfig.copy(
-            genesisSpec = inferenceConfig.genesisSpec?.merge(fastSpec) ?: fastSpec
+    fun `marketplace positive unclaimed summary refunds only at claim expiry`() {
+        val config = fastMarketplaceConfig()
+        val (cluster, genesis) = initCluster(config = config, reboot = true)
+        cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
+
+        // join1 is a real active participant with PoC weight. Its DAPI stays up
+        // through target-E PoC validation so native settlement can assign a
+        // positive reward, then stops before the following CLAIM_REWARDS stage.
+        val unclaimedHost = cluster.joinPairs.first()
+        val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
+
+        logSection("Deploy Marketplace and fund an isolated claim-expiry Deal")
+        runHarness(
+            "bootstrap",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--run-id", requiredEnv("A8_RUN_ID"),
+            "--target-epoch", targetEpoch.toString(),
+            "--deal-wasm", requiredEnv("A8_DEAL_WASM"),
+            "--factory-wasm", requiredEnv("A8_FACTORY_WASM"),
+            "--cw20-wasm", requiredEnv("A8_CW20_WASM"),
+            "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
+            "--host-node", "genesis-node",
+            "--host-key", "genesis",
         )
+        prepareDeal(
+            "claim-expiry-positive",
+            targetEpoch,
+            funded = true,
+            hostNode = "join1-node",
+            hostKey = "join1",
+        )
+
+        genesis.markNeedsReboot()
+        logSection("Reach E-1 and keep Host active through target-E settlement")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch - 1) {
+            genesis.waitForNextEpoch()
+        }
+        genesis.waitForStage(EpochStage.END_OF_POC_VALIDATION, offset = 0)
+        unclaimedHost.stopApiContainer()
+
+        logSection("Enter E=$targetEpoch and lock the exact native recipient")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness(
+            "lock-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry-positive",
+        )
+        runHarness(
+            "verify-unclaimed-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry-positive",
+            "--require-positive",
+        )
+
+        logSection("At E+1 Refund must fail closed without changing the Deal")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 1) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness(
+            "refund-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry-positive",
+            "--expect", "failure",
+            "--reason", "too_early",
+        )
+
+        logSection("At E+2 the same positive summary must remain unclaimed")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 2) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness(
+            "verify-unclaimed-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry-positive",
+            "--require-positive",
+        )
+        runHarness(
+            "refund-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry-positive",
+            "--expect", "success",
+            "--reason", "claim_expiry",
+        )
+    }
+
+    @Test
+    fun `marketplace funded claim settles and releases on real Gonka`() {
+        val config = fastMarketplaceConfig()
         val (cluster, genesis) = initCluster(config = config, reboot = true)
         cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
 
@@ -408,6 +476,31 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--routing", "pruned",
         )
         runHarness("verify-factory-isolation", "--context", requiredEnv("A8_CONTEXT"))
+    }
+
+    private fun fastMarketplaceConfig(): com.productscience.ApplicationConfig {
+        val fastSpec = spec {
+            this[AppState::inference] = spec<InferenceState> {
+                this[InferenceState::params] = spec<InferenceParams> {
+                    this[InferenceParams::tokenomicsParams] = spec<TokenomicsParams> {
+                        this[TokenomicsParams::workVestingPeriod] = 2L
+                        this[TokenomicsParams::rewardVestingPeriod] = 2L
+                    }
+                    this[InferenceParams::epochParams] = spec<EpochParams> {
+                        this[EpochParams::epochLength] = 25L
+                    }
+                }
+            }
+            this[AppState::restrictions] = spec<RestrictionsState> {
+                this[RestrictionsState::params] = spec<RestrictionsParams> {
+                    this[RestrictionsParams::restrictionEndBlock] = 0L
+                }
+            }
+        }
+        val config = inferenceConfig.copy(
+            genesisSpec = inferenceConfig.genesisSpec?.merge(fastSpec) ?: fastSpec
+        )
+        return config
     }
 
     private fun runHarness(vararg args: String) {
