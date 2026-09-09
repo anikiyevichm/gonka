@@ -197,6 +197,7 @@ func (app *App) registerLegacyModules(appOpts servertypes.AppOptions, wasmOpts [
 			Stargate: wasmkeeper.AcceptListStargateQuerier(acceptedStargate, app.GRPCQueryRouter(), app.AppCodec()),
 		})
 	wasmOpts = append(wasmOpts, querierOpts)
+	wasmOpts = appendA8QueryFaultOptions(wasmOpts, appOpts)
 
 	availableCapabilities := strings.Join(AllCapabilities(), ",")
 	app.WasmKeeper = wasmkeeper.NewKeeper(
