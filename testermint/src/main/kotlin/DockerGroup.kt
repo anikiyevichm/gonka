@@ -720,7 +720,7 @@ data class DockerGroup(
                     "-v", "${baseDir.toAbsolutePath()}:/workdir",
                     "-w", "/workdir",
                     "alpine:3.19",
-                    "sh", "-c", "rm -rf prod-local && mkdir -p prod-local/mock-server/genesis/mappings prod-local/mock-server/genesis/__files prod-local/mock-server/join1/mappings prod-local/mock-server/join1/__files prod-local/mock-server/join2/mappings prod-local/mock-server/join2/__files"
+                    "sh", "-c", "mkdir -p prod-local && find prod-local -mindepth 1 -maxdepth 1 -exec rm -rf {} + && mkdir -p prod-local/mock-server/genesis/mappings prod-local/mock-server/genesis/__files prod-local/mock-server/join1/mappings prod-local/mock-server/join1/__files prod-local/mock-server/join2/mappings prod-local/mock-server/join2/__files"
                 )
                     .directory(baseDir.toFile())
                     .start()
