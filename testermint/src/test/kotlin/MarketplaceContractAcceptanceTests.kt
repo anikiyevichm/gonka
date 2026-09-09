@@ -89,8 +89,8 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "claim-expiry",
             expiryEpoch,
             funded = true,
-            hostNode = "join2-node",
-            hostKey = "join2",
+            hostNode = "genesis-node",
+            hostKey = lockEPlus4Participant,
         )
         prepareDeal(
             "no-buyer-expired",
@@ -194,8 +194,8 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--expect", "success",
             "--reason", "claim_expiry",
         )
-        // Keep join2's summary available through the unclaimed E/E+2 checks;
-        // stop it only before the later NetworkUnconfirmed scenario.
+        // Keep the inactive host's native summary unclaimed through E/E+2;
+        // stop join2 only before the later NetworkUnconfirmed scenario.
         absentSummaryParticipant.stopApiContainer()
         logSection("Auto-claim stopped; wait for native claim window")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
