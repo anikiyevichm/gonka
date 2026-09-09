@@ -2,6 +2,7 @@ import com.google.gson.JsonParser
 import com.productscience.EpochStage
 import com.productscience.data.Coin
 import com.productscience.data.AppState
+import com.productscience.data.BitcoinRewardParams
 import com.productscience.data.EpochParams
 import com.productscience.data.InferenceParams
 import com.productscience.data.InferenceState
@@ -22,6 +23,95 @@ import java.util.concurrent.TimeUnit
 
 @Timeout(value = 35, unit = TimeUnit.MINUTES)
 class MarketplaceContractAcceptanceTests : TestermintTest() {
+    @Test
+    fun `marketplace zero unclaimed summary refunds only at claim expiry`() {
+        // This is a special test-network genesis setting, not a production default.
+        // Native Params.Validate accepts uint64 zero, and the unchanged settlement
+        // keeper still writes an EpochPerformanceSummary for the active participant.
+        val config = fastMarketplaceConfig(initialEpochReward = 0L)
+        val (cluster, genesis) = initCluster(config = config, reboot = true)
+        cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
+
+        val unclaimedHost = cluster.joinPairs.first()
+        val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
+
+        logSection("Deploy Marketplace under the zero-subsidy test genesis")
+        runHarness(
+            "bootstrap",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--run-id", requiredEnv("A8_RUN_ID"),
+            "--target-epoch", targetEpoch.toString(),
+            "--deal-wasm", requiredEnv("A8_DEAL_WASM"),
+            "--factory-wasm", requiredEnv("A8_FACTORY_WASM"),
+            "--cw20-wasm", requiredEnv("A8_CW20_WASM"),
+            "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
+            "--host-node", "genesis-node",
+            "--host-key", "genesis",
+            "--expected-initial-epoch-reward", "0",
+        )
+        prepareDeal(
+            "claim-expiry-zero",
+            targetEpoch,
+            funded = true,
+            hostNode = "join1-node",
+            hostKey = "join1",
+        )
+
+        genesis.markNeedsReboot()
+        logSection("Reach E-1 and preserve the ordinary active Host snapshot")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch - 1) {
+            genesis.waitForNextEpoch()
+        }
+        genesis.waitForStage(EpochStage.END_OF_POC_VALIDATION, offset = 0)
+        unclaimedHost.stopApiContainer()
+
+        logSection("Enter E=$targetEpoch and lock the exact native recipient")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness(
+            "lock-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry-zero",
+        )
+
+        logSection("At E+1 the exact zero summary exists but Refund is too early")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 1) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness(
+            "verify-unclaimed-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry-zero",
+            "--require-zero",
+        )
+        runHarness(
+            "refund-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry-zero",
+            "--expect", "failure",
+            "--reason", "too_early",
+        )
+
+        logSection("At E+2 the same exact zero summary remains unclaimed")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 2) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness(
+            "verify-unclaimed-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry-zero",
+            "--require-zero",
+        )
+        runHarness(
+            "refund-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "claim-expiry-zero",
+            "--expect", "success",
+            "--reason", "claim_expiry",
+        )
+    }
+
     @Test
     fun `marketplace positive unclaimed summary refunds only at claim expiry`() {
         val config = fastMarketplaceConfig()
@@ -478,10 +568,17 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         runHarness("verify-factory-isolation", "--context", requiredEnv("A8_CONTEXT"))
     }
 
-    private fun fastMarketplaceConfig(): com.productscience.ApplicationConfig {
+    private fun fastMarketplaceConfig(
+        initialEpochReward: Long? = null,
+    ): com.productscience.ApplicationConfig {
         val fastSpec = spec {
             this[AppState::inference] = spec<InferenceState> {
                 this[InferenceState::params] = spec<InferenceParams> {
+                    if (initialEpochReward != null) {
+                        this[InferenceParams::bitcoinRewardParams] = spec<BitcoinRewardParams> {
+                            this[BitcoinRewardParams::initialEpochReward] = initialEpochReward
+                        }
+                    }
                     this[InferenceParams::tokenomicsParams] = spec<TokenomicsParams> {
                         this[TokenomicsParams::workVestingPeriod] = 2L
                         this[TokenomicsParams::rewardVestingPeriod] = 2L
