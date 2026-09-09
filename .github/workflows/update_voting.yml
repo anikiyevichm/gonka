@@ -1,9 +1,5 @@
 name: Update Voting Configuration
 on:
-  workflow_run:
-    workflows: [ "Build and Release to race-releases" ]
-    types:
-      - completed
   workflow_dispatch: # Allows manual triggering
     inputs:
       release_tag:
