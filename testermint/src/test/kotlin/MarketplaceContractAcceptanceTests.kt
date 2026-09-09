@@ -24,6 +24,38 @@ import java.util.concurrent.TimeUnit
 @Timeout(value = 35, unit = TimeUnit.MINUTES)
 class MarketplaceContractAcceptanceTests : TestermintTest() {
     @Test
+    fun `marketplace funded lock succeeds exactly at E plus 4`() {
+        val config = fastMarketplaceConfig()
+        val (cluster, genesis) = initCluster(config = config, reboot = true)
+        cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
+
+        val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
+        runHarness(
+            "bootstrap",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--run-id", requiredEnv("A8_RUN_ID"),
+            "--target-epoch", targetEpoch.toString(),
+            "--deal-wasm", requiredEnv("A8_DEAL_WASM"),
+            "--factory-wasm", requiredEnv("A8_FACTORY_WASM"),
+            "--cw20-wasm", requiredEnv("A8_CW20_WASM"),
+            "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
+        )
+        // Host=join1, Buyer=join2, and the Lock fee payer=genesis are distinct.
+        prepareDeal("lock-e-plus-4", targetEpoch, funded = true)
+
+        genesis.markNeedsReboot()
+        logSection("Leave the funded Deal unlocked until its exact E+4 boundary")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 4) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness(
+            "lock-e-plus-4-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "lock-e-plus-4",
+        )
+    }
+
+    @Test
     fun `marketplace zero unclaimed summary refunds only at claim expiry`() {
         // This is a special test-network genesis setting, not a production default.
         // Native Params.Validate accepts uint64 zero, and the unchanged settlement
