@@ -757,7 +757,7 @@ data class DockerGroup(
             "-w", "/workdir",
             "alpine:3.19",
             "sh", "-c",
-            "mkdir -p /workdir/prod-local/mock-server/$pairName/mappings /workdir/prod-local/mock-server/$pairName/__files /workdir/prod-local/$pairName",
+            "mkdir -p /workdir && mkdir -p /workdir/prod-local/mock-server/$pairName/mappings /workdir/prod-local/mock-server/$pairName/__files /workdir/prod-local/$pairName",
         ).directory(baseDir.toFile()).inheritIO().start()
         check(prepareDirs.waitFor() == 0) { "failed to prepare prod-local directories" }
         Files.createDirectories(mappingsDir)
