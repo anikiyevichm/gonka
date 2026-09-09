@@ -19,6 +19,12 @@ const a8EpochSummaryPath = "/inference.inference.Query/EpochPerformanceSummaryBy
 const a8CurrentEpochPath = "/inference.inference.Query/GetCurrentEpoch"
 const a8ClaimRecipientsPath = "/inference.inference.Query/ListClaimRecipients"
 
+// These are two distinct, checksum-valid Gonka account addresses from the
+// pinned app source. The wrong-host fixture must be a valid other identity so
+// Marketplace reaches IdentityMismatch rather than InvalidAddress.
+const a8TargetHost = "gonka1y2a9p56kv044327uycmqdexl7zs82fs5ryv5le"
+const a8OtherValidHost = "gonka1dkl4mah5erqggvhqkpc8j3qs5tyuetgdy552cp"
+
 // This is deliberately equal to Marketplace's MAX_GRPC_RESPONSE_BYTES. The
 // test-only native provider returns this exact value plus one byte, allowing
 // the Rust adapter to prove its own bound before protobuf decode.
@@ -27,14 +33,15 @@ const a8MarketplaceMaxGrpcResponseBytes = 32 * 1024
 type a8FaultKind string
 
 const (
-	a8HandlerError a8FaultKind = "handler_error"
-	a8Unsupported  a8FaultKind = "unsupported_request"
-	a8BadProto     a8FaultKind = "malformed_protobuf"
-	a8Oversized     a8FaultKind = "oversized_response"
-	a8MissingNested a8FaultKind = "missing_nested_summary"
-	a8WrongHost     a8FaultKind = "wrong_host"
-	a8WrongEpoch    a8FaultKind = "wrong_epoch"
-	a8InvalidJSON   a8FaultKind = "invalid_response_envelope"
+	a8HandlerError        a8FaultKind = "handler_error"
+	a8Unsupported         a8FaultKind = "unsupported_request"
+	a8BadProto            a8FaultKind = "malformed_protobuf"
+	a8Oversized           a8FaultKind = "oversized_response"
+	a8MissingNested       a8FaultKind = "missing_nested_summary"
+	a8WrongHost           a8FaultKind = "wrong_host"
+	a8WrongEpoch          a8FaultKind = "wrong_epoch"
+	a8InvalidParticipant a8FaultKind = "invalid_participant_address"
+	a8InvalidJSON         a8FaultKind = "invalid_response_envelope"
 )
 
 type a8FaultLayer string
@@ -54,7 +61,7 @@ func a8FaultDeliveryLayer(kind a8FaultKind) a8FaultLayer {
 		return a8ContractResultLayer
 	case a8Unsupported:
 		return a8SystemResultLayer
-	case a8BadProto, a8Oversized, a8MissingNested, a8WrongHost, a8WrongEpoch:
+	case a8BadProto, a8Oversized, a8MissingNested, a8WrongHost, a8WrongEpoch, a8InvalidParticipant:
 		return a8RawResponseLayer
 	case a8InvalidJSON:
 		return a8SystemResultLayer
@@ -153,13 +160,19 @@ func a8SummaryFaultDecorator(
 		case a8WrongHost:
 			return proto.Marshal(&types.QueryEpochPerformanceSummaryByParticipantResponse{
 				EpochPerformanceSummary: types.EpochPerformanceSummary{
-					EpochIndex: selector.Epoch, ParticipantId: "gonka1a8wronghost",
+					EpochIndex: selector.Epoch, ParticipantId: a8OtherValidHost,
 				},
 			})
 		case a8WrongEpoch:
 			return proto.Marshal(&types.QueryEpochPerformanceSummaryByParticipantResponse{
 				EpochPerformanceSummary: types.EpochPerformanceSummary{
 					EpochIndex: selector.Epoch + 1, ParticipantId: selector.Host,
+				},
+			})
+		case a8InvalidParticipant:
+			return proto.Marshal(&types.QueryEpochPerformanceSummaryByParticipantResponse{
+				EpochPerformanceSummary: types.EpochPerformanceSummary{
+					EpochIndex: selector.Epoch, ParticipantId: "not-a-gonka-address",
 				},
 			})
 		default:
@@ -171,7 +184,7 @@ func a8SummaryFaultDecorator(
 func TestA8SummaryFaultSelectorIsNarrowAndDeterministic(t *testing.T) {
 	selector := a8SummaryFaultSelector{
 		Enabled: true,
-		Host:    "gonka1host",
+		Host:    a8TargetHost,
 		Epoch:   42,
 		Kind:    a8HandlerError,
 	}
@@ -185,14 +198,14 @@ func TestA8SummaryFaultSelectorIsNarrowAndDeterministic(t *testing.T) {
 		return &wasmvmtypes.GrpcQuery{Path: path, Data: data}
 	}
 
-	require.True(t, selector.matches(request(a8EpochSummaryPath, "gonka1host", 42)))
-	require.False(t, selector.matches(request("/inference.inference.Query/GetCurrentEpoch", "gonka1host", 42)))
-	require.False(t, selector.matches(request(a8EpochSummaryPath, "gonka1other", 42)))
-	require.False(t, selector.matches(request(a8EpochSummaryPath, "gonka1host", 43)))
+	require.True(t, selector.matches(request(a8EpochSummaryPath, a8TargetHost, 42)))
+	require.False(t, selector.matches(request("/inference.inference.Query/GetCurrentEpoch", a8TargetHost, 42)))
+	require.False(t, selector.matches(request(a8EpochSummaryPath, a8OtherValidHost, 42)))
+	require.False(t, selector.matches(request(a8EpochSummaryPath, a8TargetHost, 43)))
 	require.False(t, selector.matches(&wasmvmtypes.GrpcQuery{Path: a8EpochSummaryPath, Data: []byte{0xff}}))
 
 	selector.Enabled = false
-	require.False(t, selector.matches(request(a8EpochSummaryPath, "gonka1host", 42)))
+	require.False(t, selector.matches(request(a8EpochSummaryPath, a8TargetHost, 42)))
 }
 
 func TestA8RouteFaultScopeUsesDealForCurrentEpochAndDecodedKeysElsewhere(t *testing.T) {
@@ -229,14 +242,15 @@ func TestA8RouteFaultScopeUsesDealForCurrentEpochAndDecodedKeysElsewhere(t *test
 
 func TestA8FaultKindsKeepTheirActualWasmBoundary(t *testing.T) {
 	tests := map[a8FaultKind]a8FaultLayer{
-		a8HandlerError: a8ContractResultLayer,
-		a8Unsupported:  a8SystemResultLayer,
-		a8BadProto:     a8RawResponseLayer,
-		a8Oversized:     a8RawResponseLayer,
-		a8MissingNested: a8RawResponseLayer,
-		a8WrongHost:     a8RawResponseLayer,
-		a8WrongEpoch:    a8RawResponseLayer,
-		a8InvalidJSON:   a8SystemResultLayer,
+		a8HandlerError:        a8ContractResultLayer,
+		a8Unsupported:         a8SystemResultLayer,
+		a8BadProto:            a8RawResponseLayer,
+		a8Oversized:           a8RawResponseLayer,
+		a8MissingNested:       a8RawResponseLayer,
+		a8WrongHost:           a8RawResponseLayer,
+		a8WrongEpoch:          a8RawResponseLayer,
+		a8InvalidParticipant: a8RawResponseLayer,
+		a8InvalidJSON:         a8SystemResultLayer,
 	}
 	for kind, want := range tests {
 		require.Equal(t, want, a8FaultDeliveryLayer(kind), string(kind))
@@ -254,7 +268,7 @@ func TestA8SummaryFaultDecoratorDelegatesUnlessExactHostEpochIsEnabled(t *testin
 		return []byte("healthy"), nil
 	})
 	selector := a8SummaryFaultSelector{
-		Enabled: true, Host: "gonka1host", Epoch: 42, Kind: a8BadProto,
+		Enabled: true, Host: a8TargetHost, Epoch: 42, Kind: a8BadProto,
 	}
 	decorated := a8SummaryFaultDecorator(selector, next)
 	request := func(path, host string, epoch uint64) wasmvmtypes.QueryRequest {
@@ -266,9 +280,9 @@ func TestA8SummaryFaultDecoratorDelegatesUnlessExactHostEpochIsEnabled(t *testin
 	}
 
 	for _, query := range []wasmvmtypes.QueryRequest{
-		request("/inference.inference.Query/GetCurrentEpoch", "gonka1host", 42),
-		request(a8EpochSummaryPath, "gonka1other", 42),
-		request(a8EpochSummaryPath, "gonka1host", 43),
+		request("/inference.inference.Query/GetCurrentEpoch", a8TargetHost, 42),
+		request(a8EpochSummaryPath, a8OtherValidHost, 42),
+		request(a8EpochSummaryPath, a8TargetHost, 43),
 		{Grpc: &wasmvmtypes.GrpcQuery{Path: a8EpochSummaryPath, Data: []byte{0xff}}},
 	} {
 		got, err := decorated.HandleQuery(sdk.Context{}, nil, query)
@@ -279,7 +293,7 @@ func TestA8SummaryFaultDecoratorDelegatesUnlessExactHostEpochIsEnabled(t *testin
 
 	selector.Enabled = false
 	disabled := a8SummaryFaultDecorator(selector, next)
-	got, err := disabled.HandleQuery(sdk.Context{}, nil, request(a8EpochSummaryPath, "gonka1host", 42))
+	got, err := disabled.HandleQuery(sdk.Context{}, nil, request(a8EpochSummaryPath, a8TargetHost, 42))
 	require.NoError(t, err)
 	require.Equal(t, []byte("healthy"), got)
 	require.Equal(t, 5, delegated)
@@ -294,18 +308,18 @@ func TestA8SummaryFaultDecoratorProducesOnlyItsDeclaredLayer(t *testing.T) {
 		return []byte("unexpected delegate"), nil
 	})
 	data, err := proto.Marshal(&types.QueryEpochPerformanceSummaryByParticipantRequest{
-		ParticipantId: "gonka1host", EpochIndex: 42,
+		ParticipantId: a8TargetHost, EpochIndex: 42,
 	})
 	require.NoError(t, err)
 	request := wasmvmtypes.QueryRequest{Grpc: &wasmvmtypes.GrpcQuery{Path: a8EpochSummaryPath, Data: data}}
 
 	for _, kind := range []a8FaultKind{
 		a8HandlerError, a8Unsupported, a8BadProto, a8Oversized,
-		a8MissingNested, a8WrongHost, a8WrongEpoch,
+		a8MissingNested, a8WrongHost, a8WrongEpoch, a8InvalidParticipant,
 	} {
 		t.Run(string(kind), func(t *testing.T) {
 			provider := a8SummaryFaultDecorator(a8SummaryFaultSelector{
-				Enabled: true, Host: "gonka1host", Epoch: 42, Kind: kind,
+				Enabled: true, Host: a8TargetHost, Epoch: 42, Kind: kind,
 			}, next)
 			response, faultErr := provider.HandleQuery(sdk.Context{}, nil, request)
 			result := wasmvmtypes.ToQuerierResult(response, faultErr)
@@ -331,6 +345,17 @@ func TestA8SummaryFaultDecoratorProducesOnlyItsDeclaredLayer(t *testing.T) {
 			}
 			if kind == a8MissingNested {
 				require.Empty(t, response, "field 1 must be absent, not a 0a00 empty nested message")
+			}
+			if kind == a8WrongHost {
+				var decoded types.QueryEpochPerformanceSummaryByParticipantResponse
+				require.NoError(t, proto.Unmarshal(response, &decoded))
+				require.Equal(t, a8OtherValidHost, decoded.EpochPerformanceSummary.ParticipantId)
+				require.NotEqual(t, a8TargetHost, decoded.EpochPerformanceSummary.ParticipantId)
+			}
+			if kind == a8InvalidParticipant {
+				var decoded types.QueryEpochPerformanceSummaryByParticipantResponse
+				require.NoError(t, proto.Unmarshal(response, &decoded))
+				require.Equal(t, "not-a-gonka-address", decoded.EpochPerformanceSummary.ParticipantId)
 			}
 		})
 	}
