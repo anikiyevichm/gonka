@@ -77,6 +77,13 @@ val DNS_COMPOSE_FILES = listOf(DNS_SERVER_COMPOSE_FILE, DNS_OVERRIDES_COMPOSE_FI
 private const val SHARED_DNS_PROJECT = "testdns"
 private const val TEST_DNS_IPV4 = "172.25.0.10"
 private val FILE_SETUP_LOCK = Any()
+
+internal fun dockerBindOwner(path: Path): String? = runCatching {
+    val uid = Files.getAttribute(path, "unix:uid")
+    val gid = Files.getAttribute(path, "unix:gid")
+    "$uid:$gid"
+}.getOrNull()
+
 val BASE_COMPOSE_FILES = listOf(
     "${LOCAL_TEST_NET_DIR}/docker-compose-base.yml",
 )
@@ -719,18 +726,31 @@ data class DockerGroup(
     private fun setupFiles() {
         val baseDir = Path.of(workingDirectory)
         synchronized(FILE_SETUP_LOCK) {
-        if (isGenesis && Files.isDirectory(baseDir.resolve("prod-local")) &&
-            Files.list(baseDir.resolve("prod-local")).use { it.findAny().isPresent }) {
+        if (isGenesis) {
             val prodLocal = baseDir.resolve("prod-local")
             try {
-                // Use Docker to clean up root-owned files on Linux
-                val cleanupProcess = ProcessBuilder(
-                    "docker", "run", "--rm",
+                // Always create the bind-mounted tree through Docker. On a reused
+                // Windows checkout, WSL DrvFs can report an externally removed name
+                // as absent on lookup but existing on mkdir. Keep root for removal of
+                // container-owned files, then return the tree to the host UID/GID so
+                // the following JVM process can populate the created directories.
+                val bindOwner = dockerBindOwner(baseDir)
+                val restoreOwnership = bindOwner?.let { " && chown -R $it prod-local" }.orEmpty()
+                val cleanupCommand = mutableListOf("docker", "run", "--rm")
+                cleanupCommand.addAll(listOf(
                     "-v", "${baseDir.toAbsolutePath()}:/workdir",
                     "-w", "/workdir",
                     "alpine:3.19",
-                    "sh", "-c", "mkdir -p prod-local && find prod-local -mindepth 1 -maxdepth 1 -exec rm -rf {} + && mkdir -p prod-local/mock-server/genesis/mappings prod-local/mock-server/genesis/__files prod-local/mock-server/join1/mappings prod-local/mock-server/join1/__files prod-local/mock-server/join2/mappings prod-local/mock-server/join2/__files"
-                )
+                    "sh", "-c",
+                    "mkdir -p prod-local && " +
+                        "find prod-local -mindepth 1 -maxdepth 1 -exec rm -rf {} + && " +
+                        "mkdir -p prod-local/genesis prod-local/join1 prod-local/join2 " +
+                        "prod-local/mock-server/genesis/mappings prod-local/mock-server/genesis/__files " +
+                        "prod-local/mock-server/join1/mappings prod-local/mock-server/join1/__files " +
+                        "prod-local/mock-server/join2/mappings prod-local/mock-server/join2/__files" +
+                        restoreOwnership,
+                ))
+                val cleanupProcess = ProcessBuilder(cleanupCommand)
                     .directory(baseDir.toFile())
                     .start()
                 
