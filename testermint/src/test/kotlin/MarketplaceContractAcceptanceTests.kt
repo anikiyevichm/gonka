@@ -30,6 +30,9 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
 
         val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
+        // bootstrap deliberately occupies join1/E. Register a separate native
+        // Host so this focused Deal cannot conflict with that permanent pair.
+        val hostKey = createInactiveParticipant(genesis, "a8-lock-e-plus-4")
         runHarness(
             "bootstrap",
             "--context", requiredEnv("A8_CONTEXT"),
@@ -40,8 +43,15 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--cw20-wasm", requiredEnv("A8_CW20_WASM"),
             "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
         )
-        // Host=join1, Buyer=join2, and the Lock fee payer=genesis are distinct.
-        prepareDeal("lock-e-plus-4", targetEpoch, funded = true)
+        // Host=the dedicated participant, Buyer=join2, and Lock fee payer=genesis
+        // are distinct addresses.
+        prepareDeal(
+            "lock-e-plus-4",
+            targetEpoch,
+            funded = true,
+            hostNode = "genesis-node",
+            hostKey = hostKey,
+        )
 
         genesis.markNeedsReboot()
         logSection("Leave the funded Deal unlocked until its exact E+4 boundary")
