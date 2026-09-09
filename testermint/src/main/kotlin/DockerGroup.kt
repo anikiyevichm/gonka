@@ -718,7 +718,7 @@ data class DockerGroup(
                     "-v", "${baseDir.toAbsolutePath()}:/workdir",
                     "-w", "/workdir",
                     "alpine:3.19",
-                    "rm", "-rf", "prod-local"
+                    "sh", "-c", "rm -rf prod-local && mkdir -p prod-local/mock-server"
                 )
                     .directory(baseDir.toFile())
                     .start()
