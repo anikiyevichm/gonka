@@ -65,10 +65,10 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
         genesis.node.waitForNextBlock(2)
         runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift")
-        runHarness("r2-gift-checkpoint", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--stage", "pre_gift")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
         genesis.node.waitForNextBlock(2)
         runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift")
+        runHarness("r2-gift-checkpoint", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--stage", "pre_gift")
 
         while (genesis.getEpochData().latestEpoch.index < targetEpoch + 5) genesis.waitForNextEpoch()
         // Isolated case evidence is written before a failed assertion is surfaced.
