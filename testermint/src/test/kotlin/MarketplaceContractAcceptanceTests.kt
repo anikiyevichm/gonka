@@ -28,6 +28,83 @@ import java.util.concurrent.TimeUnit
 @Timeout(value = 35, unit = TimeUnit.MINUTES)
 class MarketplaceContractAcceptanceTests : TestermintTest() {
     @Test
+    @Timeout(value = 45, unit = TimeUnit.MINUTES)
+    fun `marketplace package C proves query faults and recovery`() {
+        // The immutable C binary is built by run-live before this cluster starts.
+        // Longer explicit test epochs leave room for the finite E+2/E+3 batches.
+        requiredEnv("A8_C_BINARY")
+        val config = fastMarketplaceConfig(enableCQueryFaults = true, epochLength = 60L)
+        val (cluster, genesis) = initCluster(config = config, reboot = true)
+        cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
+        fun phase(name: String, vararg extra: String) = runHarness(
+            "c-phase", "--context", requiredEnv("A8_CONTEXT"), "--phase", name, *extra,
+        )
+        val kinds = listOf("handler_error", "malformed_protobuf", "oversized_response",
+            "missing_nested_summary", "wrong_host", "wrong_epoch",
+            "invalid_participant_address", "unsupported_request")
+        val r4 = kinds.map { "r4-$it" }
+        val routing = listOf("handler_error", "malformed_protobuf", "duplicate_routing")
+            .flatMap { kind -> listOf("r3-$kind-lock", "r3-$kind-refund") }
+        val inactive = r4 + routing + listOf("r3-epoch-lock", "r3-epoch-refund")
+        val hosts = inactive.associateWith { createInactiveParticipant(genesis, it) }
+        val buyer = genesis.node.createKey("a8-c-buyer")
+        val funding = genesis.submitTransaction(listOf("bank", "send",
+            genesis.node.getColdAddress(), buyer.address, "1000000ngonka"))
+        check(funding.code == 0) { "C Buyer fee funding failed: ${funding.rawLog}" }
+        // Compute E AFTER registrations, so fixture creation cannot consume the
+        // original target window. Every offer has its own unique Host/E pair.
+        val targetEpoch = genesis.getEpochData().latestEpoch.index + 2
+        runHarness(
+            "bootstrap", "--context", requiredEnv("A8_CONTEXT"), "--run-id", requiredEnv("A8_RUN_ID"),
+            "--target-epoch", targetEpoch.toString(), "--deal-wasm", requiredEnv("A8_DEAL_WASM"),
+            "--factory-wasm", requiredEnv("A8_FACTORY_WASM"), "--cw20-wasm", requiredEnv("A8_CW20_WASM"),
+            "--caller-wasm", requiredEnv("A8_CALLER_WASM"), "--buyer-node", "genesis-node",
+            "--buyer-key", buyer.name, "--buyer-tokens", "1000000000",
+        )
+        inactive.forEach { prepareDeal(it, targetEpoch, true, "genesis-node", hosts.getValue(it)) }
+        prepareDeal("r5-cancel", targetEpoch, true, "join2-node", "join2")
+        phase("prepare") // Explicitly aliases the primary join1/E Deal as r5-recover.
+        genesis.markNeedsReboot()
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch) genesis.waitForNextEpoch()
+        (r4 + listOf("r3-epoch-refund", "r5-recover", "r5-cancel")).forEach {
+            runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", it)
+        }
+        val participants = cluster.joinPairs
+        check(participants.size == 2)
+        val seeds = participants.map { it.api.getConfig().currentSeed }
+        seeds.forEach { check(it.epochIndex == targetEpoch) { "C requires exact real claim seed E" } }
+        participants.forEach { it.stopApiContainer() }
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        listOf("r5-recover", "r5-cancel").forEachIndexed { index, name ->
+            runHarness("claim-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", name,
+                "--reward-seed", seeds[index].seed.toString(), "--reward-epoch", targetEpoch.toString())
+        }
+        phase("activate")
+        genesis.node.waitForNextBlock(2)
+        phase("routing")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 2) genesis.waitForNextEpoch()
+        phase("early")
+        phase("recover-before")
+        genesis.node.waitForNextBlock(2)
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 3) genesis.waitForNextEpoch()
+        phase("late")
+        phase("recover-after")
+        genesis.node.waitForNextBlock(2)
+        phase("terminal")
+        // R7.2 is a real native keeper restriction, independent of query faults.
+        // Its helper requires original vesting fully unlocked before fault/retry.
+        val restrictionEnd = genesis.node.queryRestrictionsStatus().currentBlockHeight + 50
+        val proposal = genesis.runProposal(cluster, UpdateRestrictionsParams(params = RestrictionsParams(
+            restrictionEndBlock = restrictionEnd,
+            emergencyTransferExemptions = emptyList(), exemptionUsageTracking = emptyList(),
+        )))
+        phase("bank-fault", "--proposal-id", proposal)
+        genesis.node.waitForMinimumBlock(restrictionEnd + 1, "C R7.2 restriction expiry")
+        phase("bank-retry")
+        phase("report")
+    }
+
+    @Test
     fun `marketplace package A preserves R1 refund boundary and releases a new vested gift`() {
         // One cluster is intentional: R1 and R2 get independent Host/E and Deal
         // fixtures, but share a monotonic epoch schedule and one bootstrap.
@@ -1127,6 +1204,8 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
     private fun fastMarketplaceConfig(
         initialEpochReward: Long? = null,
         enableB3ForeignNativeFixture: Boolean = false,
+        enableCQueryFaults: Boolean = false,
+        epochLength: Long = 25L,
     ): com.productscience.ApplicationConfig {
         val fastSpec = spec {
             this[AppState::inference] = spec<InferenceState> {
@@ -1141,7 +1220,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
                         this[TokenomicsParams::rewardVestingPeriod] = 2L
                     }
                     this[InferenceParams::epochParams] = spec<EpochParams> {
-                        this[EpochParams::epochLength] = 25L
+                        this[EpochParams::epochLength] = epochLength
                     }
                 }
             }
@@ -1150,7 +1229,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
                     this[RestrictionsParams::restrictionEndBlock] = 0L
                 }
             }
-            if (enableB3ForeignNativeFixture) {
+            if (enableB3ForeignNativeFixture || enableCQueryFaults) {
                 // The stock test override has a 24h expedited voting period
                 // alongside a 30s regular period.  B3 does not exercise
                 // governance, but its genesis preflight must validate.
@@ -1163,7 +1242,11 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         }
         val config = inferenceConfig.copy(
             genesisSpec = inferenceConfig.genesisSpec?.merge(fastSpec) ?: fastSpec,
-            additionalDockerFilesByKeyName = if (enableB3ForeignNativeFixture) {
+            additionalDockerFilesByKeyName = if (enableCQueryFaults) {
+                listOf(GENESIS_KEY_NAME, "join1", "join2").associateWith {
+                    listOf("docker-compose.a8-query-faults.yml")
+                }
+            } else if (enableB3ForeignNativeFixture) {
                 mapOf(GENESIS_KEY_NAME to listOf("docker-compose.genesis-a8-b3-foreign-denom.yml"))
             } else {
                 emptyMap()

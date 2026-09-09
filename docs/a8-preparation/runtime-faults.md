@@ -103,5 +103,19 @@ go test -mod=readonly -tags=a8faults ./app -run A8 -count=1
 ```
 
 These do not start a node or Docker. The package-C handoff remains the fixed
-case list; its future live orchestrator must use this provider and evidence
-contract rather than claim that ordinary RPC failures are native query faults.
+case list. The connected `package-c-query-faults` selector now uses this provider
+through Marketplace `scripts/a8_query_faults.py`, rather than treating ordinary
+RPC failures as injected native query faults. No live PASS is claimed by wiring it.
+
+The selector alone adds `docker-compose.a8-query-faults.yml`. It resumes an
+initialized node through cosmovisor on restart; fresh nodes use the original
+initialization scripts. Ordinary selectors do not use this overlay.
+
+The controller schedules every new plan eight blocks after the highest observed
+node height, stops all three owned validators, checks last-signed heights and
+verifies copied hashes before restarting any node. New plans preserve every
+historical rule interval, including after recovery: lagging validators must
+replay earlier blocks with their original query behavior. All validators must
+acknowledge identical hashes and reach the scheduled height before cases continue.
+R5.1 recovery must reach its boundary strictly before E+3. No chain state is
+modified, and partial installation never automatically resumes a mixed cluster.
