@@ -1004,6 +1004,9 @@ fun ensureSharedTestDns() {
     val deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos()
     while (System.nanoTime() < deadline) {
         if (isDockerContainerRunning("test-dns")) {
+            // CoreDNS can be running before Docker's embedded DNS route is
+            // ready for the concurrently started join stacks.
+            Thread.sleep(Duration.ofSeconds(5).toMillis())
             return
         }
         Thread.sleep(Duration.ofSeconds(1))
