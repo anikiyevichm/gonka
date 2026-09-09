@@ -1,9 +1,12 @@
 import com.google.gson.JsonParser
 import com.productscience.EpochStage
+import com.productscience.GENESIS_KEY_NAME
 import com.productscience.data.Coin
 import com.productscience.data.AppState
 import com.productscience.data.BitcoinRewardParams
 import com.productscience.data.EpochParams
+import com.productscience.data.GovParams
+import com.productscience.data.GovState
 import com.productscience.data.InferenceParams
 import com.productscience.data.InferenceState
 import com.productscience.data.MsgTransferWithVesting
@@ -19,6 +22,7 @@ import com.productscience.logSection
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import java.io.File
+import java.time.Duration
 import java.util.concurrent.TimeUnit
 
 @Timeout(value = 35, unit = TimeUnit.MINUTES)
@@ -429,6 +433,69 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
     }
 
     @Test
+    fun `marketplace successful release preserves foreign native denom`() {
+        val config = fastMarketplaceConfig(enableB3ForeignNativeFixture = true)
+        val (cluster, genesis) = initCluster(config = config, reboot = true)
+        cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
+
+        val participant = cluster.joinPairs.first()
+        val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
+        importB3ForeignNativeKey(genesis)
+        check(genesis.node.getBalance(B3_FOREIGN_ADDRESS, B3_FOREIGN_DENOM).balance.amount == B3_FOREIGN_AMOUNT) {
+            "B3 genesis fixture did not preserve its exact foreign native balance"
+        }
+
+        logSection("Deploy one funded B3 Deal with independent financial roles")
+        runHarness(
+            "bootstrap",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--run-id", requiredEnv("A8_RUN_ID"),
+            "--target-epoch", targetEpoch.toString(),
+            "--deal-wasm", requiredEnv("A8_DEAL_WASM"),
+            "--factory-wasm", requiredEnv("A8_FACTORY_WASM"),
+            "--cw20-wasm", requiredEnv("A8_CW20_WASM"),
+            "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
+        )
+
+        genesis.markNeedsReboot()
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness("lock", "--context", requiredEnv("A8_CONTEXT"))
+        val rewardSeed = participant.api.getConfig().currentSeed
+        check(rewardSeed.epochIndex == targetEpoch) {
+            "Testermint reward seed ${rewardSeed.epochIndex} != B3 Deal epoch $targetEpoch"
+        }
+
+        participant.stopApiContainer()
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        runHarness(
+            "claim-settle",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--reward-seed", rewardSeed.seed.toString(),
+            "--reward-epoch", rewardSeed.epochIndex.toString(),
+        )
+
+        participant.restartApiContainer()
+        genesis.node.waitForNextBlock(2)
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = -1)
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        genesis.node.waitForNextBlock(2)
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 2) {
+            genesis.waitForNextEpoch()
+        }
+        genesis.node.waitForNextBlock(2)
+        runHarness(
+            "b3-foreign-native-release",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--foreign-key", B3_FOREIGN_KEY,
+            "--foreign-address", B3_FOREIGN_ADDRESS,
+            "--foreign-denom", B3_FOREIGN_DENOM,
+            "--foreign-amount", B3_FOREIGN_AMOUNT.toString(),
+        )
+    }
+
+    @Test
     fun `marketplace funded claim settles and releases on real Gonka`() {
         val config = fastMarketplaceConfig()
         val (cluster, genesis) = initCluster(config = config, reboot = true)
@@ -810,6 +877,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
 
     private fun fastMarketplaceConfig(
         initialEpochReward: Long? = null,
+        enableB3ForeignNativeFixture: Boolean = false,
     ): com.productscience.ApplicationConfig {
         val fastSpec = spec {
             this[AppState::inference] = spec<InferenceState> {
@@ -833,11 +901,41 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
                     this[RestrictionsParams::restrictionEndBlock] = 0L
                 }
             }
+            if (enableB3ForeignNativeFixture) {
+                // The stock test override has a 24h expedited voting period
+                // alongside a 30s regular period.  B3 does not exercise
+                // governance, but its genesis preflight must validate.
+                this[AppState::gov] = spec<GovState> {
+                    this[GovState::params] = spec<GovParams> {
+                        this[GovParams::expeditedVotingPeriod] = Duration.ofSeconds(15)
+                    }
+                }
+            }
         }
         val config = inferenceConfig.copy(
-            genesisSpec = inferenceConfig.genesisSpec?.merge(fastSpec) ?: fastSpec
+            genesisSpec = inferenceConfig.genesisSpec?.merge(fastSpec) ?: fastSpec,
+            additionalDockerFilesByKeyName = if (enableB3ForeignNativeFixture) {
+                mapOf(GENESIS_KEY_NAME to listOf("docker-compose.genesis-a8-b3-foreign-denom.yml"))
+            } else {
+                emptyMap()
+            },
         )
         return config
+    }
+
+    private fun importB3ForeignNativeKey(genesis: com.productscience.LocalInferencePair) {
+        genesis.node.exec(
+            listOf(
+                genesis.node.config.execName,
+                "keys",
+                "add",
+                B3_FOREIGN_KEY,
+                "--recover",
+                "--output",
+                "json",
+            ) + genesis.node.config.keychainParams,
+            stdin = B3_FOREIGN_MNEMONIC + "\n",
+        )
     }
 
     private fun runHarness(vararg args: String) {
@@ -899,4 +997,12 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
     private fun requiredEnv(name: String): String =
         System.getenv(name)?.takeIf { it.isNotBlank() }
             ?: error("Required environment variable $name is missing")
+
+    private companion object {
+        const val B3_FOREIGN_KEY = "a8-b3-foreign"
+        const val B3_FOREIGN_MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        const val B3_FOREIGN_ADDRESS = "gonka1k4swv40ur28fvu54p8mskjj4lxkgsj07u9f8ny"
+        const val B3_FOREIGN_DENOM = "ua8b3foreign"
+        const val B3_FOREIGN_AMOUNT = 12_345L
+    }
 }

@@ -131,6 +131,28 @@ echo "Adding the keys to the genesis account"
 $APP_NAME genesis add-genesis-account "$KEY_NAME" "2$NATIVE" --keyring-backend $KEYRING_BACKEND
 $APP_NAME genesis add-genesis-account "POOL_product_science_inc" "160$MILLION_NATIVE" --keyring-backend $KEYRING_BACKEND
 
+# A8 B3 is the only consumer of this opt-in fixture.  It is deliberately
+# created through the normal Cosmos SDK genesis command so Bank supply remains
+# equal to the balances produced by genesis.  No running-chain state is edited.
+if [ -n "${A8_B3_FOREIGN_DENOM:-}" ]; then
+  : "${A8_B3_FOREIGN_ADDRESS:?A8_B3_FOREIGN_ADDRESS is required with A8_B3_FOREIGN_DENOM}"
+  : "${A8_B3_FOREIGN_AMOUNT:?A8_B3_FOREIGN_AMOUNT is required with A8_B3_FOREIGN_DENOM}"
+  case "$A8_B3_FOREIGN_AMOUNT" in
+    0|*[!0-9]*|'')
+      echo "A8_B3_FOREIGN_AMOUNT must be a positive integer" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$A8_B3_FOREIGN_DENOM" = "$COIN_DENOM" ]; then
+    echo "A8_B3_FOREIGN_DENOM must differ from $COIN_DENOM" >&2
+    exit 1
+  fi
+  echo "Adding opt-in A8 B3 foreign native denom account"
+  $APP_NAME genesis add-genesis-account "$A8_B3_FOREIGN_ADDRESS" \
+    "${A8_B3_FOREIGN_AMOUNT}${A8_B3_FOREIGN_DENOM}" \
+    --keyring-backend $KEYRING_BACKEND
+fi
+
 # Get the warm key address for ML operations
 WARM_KEY_ADDRESS=$($APP_NAME keys show "$KEY_NAME_WARM" --address --keyring-backend $KEYRING_BACKEND --keyring-dir "$STATE_DIR")
 
