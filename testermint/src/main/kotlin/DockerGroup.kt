@@ -711,7 +711,8 @@ data class DockerGroup(
     private fun setupFiles() {
         val baseDir = Path.of(workingDirectory)
         synchronized(FILE_SETUP_LOCK) {
-        if (isGenesis) {
+        if (isGenesis && Files.isDirectory(baseDir.resolve("prod-local")) &&
+            Files.list(baseDir.resolve("prod-local")).use { it.findAny().isPresent }) {
             val prodLocal = baseDir.resolve("prod-local")
             try {
                 // Use Docker to clean up root-owned files on Linux
