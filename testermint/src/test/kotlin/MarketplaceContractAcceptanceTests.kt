@@ -201,6 +201,88 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
     }
 
     @Test
+    fun `marketplace absent native summary refunds only at emergency deadline`() {
+        val config = fastMarketplaceConfig()
+        val (cluster, genesis) = initCluster(config = config, reboot = true)
+        cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
+
+        // Configure a real recipient while join2 is registered, then keep its DAPI
+        // offline for five complete epochs before E. Native settlement only writes
+        // summaries for the active participant snapshot, so exact Host/E is absent.
+        val absentSummaryHost = cluster.joinPairs[1]
+        val targetEpoch = genesis.getEpochData().latestEpoch.index + 5
+
+        logSection("Deploy and fund an isolated emergency-refund Deal")
+        runHarness(
+            "bootstrap",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--run-id", requiredEnv("A8_RUN_ID"),
+            "--target-epoch", targetEpoch.toString(),
+            "--deal-wasm", requiredEnv("A8_DEAL_WASM"),
+            "--factory-wasm", requiredEnv("A8_FACTORY_WASM"),
+            "--cw20-wasm", requiredEnv("A8_CW20_WASM"),
+            "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
+            "--host-node", "genesis-node",
+            "--host-key", "genesis",
+        )
+        prepareDeal(
+            "network-unconfirmed",
+            targetEpoch,
+            funded = true,
+            hostNode = "join2-node",
+            hostKey = "join2",
+        )
+
+        genesis.markNeedsReboot()
+        absentSummaryHost.stopApiContainer()
+        logSection("Keep Host offline through E=$targetEpoch and lock its exact recipient")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness(
+            "lock-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "network-unconfirmed",
+        )
+
+        logSection("At E+2 exact native NotFound still fails closed")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 2) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness(
+            "verify-missing-summary-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "network-unconfirmed",
+            "--expected-offset", "2",
+        )
+        runHarness(
+            "refund-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "network-unconfirmed",
+            "--expect", "failure",
+            "--reason", "network_unconfirmed_too_early",
+        )
+
+        logSection("At E+3 the same native NotFound permits NetworkUnconfirmed")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 3) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness(
+            "verify-missing-summary-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "network-unconfirmed",
+            "--expected-offset", "3",
+        )
+        runHarness(
+            "refund-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "network-unconfirmed",
+            "--expect", "success",
+            "--reason", "network_unconfirmed",
+        )
+    }
+
+    @Test
     fun `marketplace funded claim settles and releases on real Gonka`() {
         val config = fastMarketplaceConfig()
         val (cluster, genesis) = initCluster(config = config, reboot = true)
