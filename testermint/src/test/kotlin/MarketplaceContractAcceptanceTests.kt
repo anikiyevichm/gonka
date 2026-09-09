@@ -89,8 +89,8 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "claim-expiry",
             expiryEpoch,
             funded = true,
-            hostNode = "genesis-node",
-            hostKey = "genesis",
+            hostNode = "join2-node",
+            hostKey = "join2",
         )
         prepareDeal(
             "no-buyer-expired",
@@ -148,8 +148,6 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         // its off-chain API afterwards so the future epoch has no reward
         // summary and exercises the real NetworkUnconfirmed path.
         genesis.markNeedsReboot()
-        absentSummaryParticipant.stopApiContainer()
-
         logSection("Wait for target epoch $targetEpoch and lock the exact routing proof")
         while (genesis.getEpochData().latestEpoch.index < targetEpoch) {
             genesis.waitForNextEpoch()
@@ -196,6 +194,9 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--expect", "success",
             "--reason", "claim_expiry",
         )
+        // Keep join2's summary available through the unclaimed E/E+2 checks;
+        // stop it only before the later NetworkUnconfirmed scenario.
+        absentSummaryParticipant.stopApiContainer()
         logSection("Auto-claim stopped; wait for native claim window")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
 
