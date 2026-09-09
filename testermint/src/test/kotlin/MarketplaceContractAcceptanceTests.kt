@@ -35,6 +35,9 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         val (cluster, genesis) = initCluster(config = config, reboot = true)
         cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
         val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
+        // bootstrap owns join1/targetEpoch; R2 deliberately uses the next
+        // epoch, so its Factory (Host,E) key cannot collide with bootstrap.
+        val r2Epoch = targetEpoch + 1
         val r1HostKey = createInactiveParticipant(genesis, "a8-package-a-r1")
 
         runHarness(
@@ -44,13 +47,13 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
         )
         prepareDeal("r1-refund-e-plus-5", targetEpoch, funded = true, hostNode = "genesis-node", hostKey = r1HostKey)
-        prepareDeal("r2-vested-gift", targetEpoch, funded = true, hostNode = "join1-node", hostKey = "join1")
+        prepareDeal("r2-vested-gift", r2Epoch, funded = true, hostNode = "join1-node", hostKey = "join1")
         genesis.markNeedsReboot()
 
-        while (genesis.getEpochData().latestEpoch.index < targetEpoch) genesis.waitForNextEpoch()
+        while (genesis.getEpochData().latestEpoch.index < r2Epoch) genesis.waitForNextEpoch()
         runHarness("lock-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift")
         val rewardSeed = cluster.joinPairs.first().api.getConfig().currentSeed
-        check(rewardSeed.epochIndex == targetEpoch) { "R2 reward seed epoch must equal its Deal epoch" }
+        check(rewardSeed.epochIndex == r2Epoch) { "R2 reward seed epoch must equal its Deal epoch" }
         cluster.joinPairs.first().stopApiContainer()
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
         runHarness("claim-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--reward-seed", rewardSeed.seed.toString(), "--reward-epoch", rewardSeed.epochIndex.toString())
@@ -62,6 +65,7 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
         genesis.node.waitForNextBlock(2)
         runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift")
+        runHarness("r2-gift-checkpoint", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--stage", "pre_gift")
         genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
         genesis.node.waitForNextBlock(2)
         runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift")
@@ -84,10 +88,13 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
             amount = listOf(Coin(genesis.config.denom, gift)), vestingEpochs = 2,
         ))
         runHarness("verify-vesting-addition-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--before-label", "before-gift", "--amount", gift.toString(), "--vesting-epochs", "2", "--fund-tx-hash", fundingTx.txhash, "--proposal-id", proposalId, "--allow-empty-before")
+        runHarness("r2-gift-checkpoint", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--stage", "fully_locked", "--gift-amount", gift.toString())
         genesis.waitForNextEpoch()
+        runHarness("r2-gift-checkpoint", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--stage", "first_unlocked", "--gift-amount", gift.toString())
         runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift")
         genesis.waitForNextEpoch()
         runHarness("release-scenario", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift")
+        runHarness("r2-gift-checkpoint", "--context", requiredEnv("A8_CONTEXT"), "--name", "r2-vested-gift", "--stage", "final", "--gift-amount", gift.toString())
         r1.getOrThrow()
     }
 
