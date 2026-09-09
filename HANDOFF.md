@@ -4,8 +4,8 @@ Status: **PREPARED** (not a live PASS).
 
 Base Marketplace SHA: `6b5df7fbdebdc7504a86a9be2c5631288f132f60`.
 Base Gonka SHA: `bbde35c87757d7519962d67424f16b5613f1fc36`.
-Prepared Marketplace code HEAD: `e00fae178d38dcfebddf273e30e9789c6b457f7c`.
-Prepared Gonka code HEAD: `53c379554e411d5467453f140a8576abe4e3dba3`.
+Prepared Marketplace code HEAD: `7877b26b5048552da95111d533fd4e017587afed`.
+Prepared Gonka code HEAD: `76ecaa3e9ce3c7a185b4933f888ee15eb66f3f64`.
 
 Changed file: `testermint/src/test/kotlin/MarketplaceContractAcceptanceTests.kt`.
 It adds one package selector/test that starts one cluster, bootstraps once, and
