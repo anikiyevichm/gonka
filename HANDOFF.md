@@ -25,10 +25,16 @@ expected Host recipient; it does not modify runtime state or summary faults.
 
 It also contains a focused R7.1 scenario: one bootstrap Deal reaches a
 proportional release; the Marketplace oracle records actual Buyer-first and
-Host-second amounts; the Kotlin test applies only the exact `Deal -> Buyer`
-exemption, proves send #2 rollback, waits for restriction expiry, and invokes
-the same selected-Deal retry/repeat route. No global restriction is presented
-as proof of send #2.
+Host-second amounts. It first proves rollback of Buyer send #1 under an active
+restriction without exemptions, then applies only the exact `Deal -> Buyer`
+exemption and proves Host send #2 rollback, waits for restriction expiry, and
+invokes the selected-Deal retry/repeat route. The Marketplace command reads
+live `restrictions params` and rejects missing, expired, broad, or insufficient
+exemptions; no launcher argument or global restriction is proof of send #2.
+
+The focused R6.1 Kotlin scenario bootstraps with price `1000`, making Host net,
+fee, and Buyer refund non-zero, then runs CW20 fault positions `1,2,3` before
+the single successful settlement retry and repeat rejection.
 
 No Docker/Testermint/E2E/Actions were run and no production runtime file changed.
 `./gradlew compileTestKotlin` was attempted from `testermint` but did not start:
