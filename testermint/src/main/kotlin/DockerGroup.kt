@@ -751,7 +751,9 @@ data class DockerGroup(
         // The cleanup intentionally removes the whole ignored directory. On
         // Windows bind mounts, create the root separately before nested paths.
         val prodLocalRoot = baseDir.resolve("prod-local")
-        Files.createDirectories(prodLocalRoot)
+        if (!Files.isDirectory(prodLocalRoot)) {
+            Files.createDirectories(prodLocalRoot)
+        }
         // The checkout may be a Windows bind mount. Create the bind-mounted
         // parents through Docker first; Java NIO can otherwise report
         // NoSuchFileException after the root-owned prod-local cleanup.
