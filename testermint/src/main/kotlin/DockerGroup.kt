@@ -748,9 +748,21 @@ data class DockerGroup(
         val mappingsSourceDir = baseDir.resolve("testermint/src/main/resources/mappings")
         val publicHtmlDir = baseDir.resolve("public-html")
 
-        Files.createDirectories(mappingsDir)
-        Files.createDirectories(filesDir)
-        Files.createDirectories(inferenceDir)
+        var prepared = false
+        repeat(10) {
+            try {
+                Files.createDirectories(mappingsDir)
+                Files.createDirectories(filesDir)
+                Files.createDirectories(inferenceDir)
+                prepared = true
+                return@repeat
+            } catch (_: NoSuchFileException) {
+                Thread.sleep(250)
+            } catch (_: FileAlreadyExistsException) {
+                Thread.sleep(250)
+            }
+        }
+        check(prepared) { "cannot prepare prod-local directories: $mappingsDir" }
         mappingsSourceDir.copyToRecursively(mappingsDir, overwrite = true, followLinks = false)
 
         val templatePath = "testermint/src/main/resources/alternative-mappings/validate_poc_batch.template.json"
