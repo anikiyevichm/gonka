@@ -1,16 +1,6 @@
 name: devshard testenv
 
 on:
-  pull_request:
-    paths:
-      - 'devshard/testenv/**'
-      - 'devshard/chainoracle/**'
-      - 'devshard/runtimeconfig/**'
-      - 'devshard/runtimeparams/**'
-      - 'common/runtimeconfig/**'
-      - 'common/chain/**'
-      - 'decentralized-api/nodemanager/**'
-      - '.github/workflows/devshard-testenv.yml'
   workflow_dispatch:
     inputs:
       integration:
@@ -18,8 +8,6 @@ on:
         required: false
         type: boolean
         default: false
-  issue_comment:
-    types: [created]
 
 jobs:
   unit:

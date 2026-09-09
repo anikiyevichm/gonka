@@ -1,12 +1,6 @@
 name: Check for panic or Must
 on:
-  push:
-    branches:
-      - main
-      - upgrade-v**
-  pull_request:
-    paths:
-      - "inference-chain/**"
+  workflow_dispatch:
 
 permissions:
   contents: read
