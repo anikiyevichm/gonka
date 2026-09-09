@@ -4,16 +4,19 @@ Status: **PREPARED** (not a live PASS).
 
 Base Marketplace SHA: `6b5df7fbdebdc7504a86a9be2c5631288f132f60`.
 Base Gonka SHA: `bbde35c87757d7519962d67424f16b5613f1fc36`.
-Prepared Marketplace code HEAD: `4eb43037d7ce74cc8386fdc43fec1ab169cad699`.
-Prepared Gonka code HEAD: `710bd8de51d811311725f7416baca24dbd821146`.
+Prepared Marketplace code HEAD: `e00fae178d38dcfebddf273e30e9789c6b457f7c`.
+Prepared Gonka code HEAD: `53c379554e411d5467453f140a8576abe4e3dba3`.
 
 Changed file: `testermint/src/test/kotlin/MarketplaceContractAcceptanceTests.kt`.
 It adds one package selector/test that starts one cluster, bootstraps once, and
-uses distinct Deal/Host-E fixtures for R1 and R2. Schedule: target E is current
-epoch +3; R2 lock/claim is at E; original two releases make it Completed;
-R1 Refund is submitted at E+5; then the native governance path transfers a
-positive `10000000001ngonka` gift with two vesting epochs and releases each
-newly unlocked tranche.
+uses distinct Deal/Host-E fixtures for R1 and R2. R1 uses `E=current+3` with a
+dedicated Host; bootstrap already owns `join1/E`, so R2 uses `join1/(E+1)`.
+R2's original two releases must make it Completed before R1 Refund at E+5.
+Then the native governance path transfers a positive `10000000001ngonka` gift
+with two vesting epochs and releases each newly unlocked tranche. Persisted
+R2 checkpoints prove pre-gift Completed/zero vesting, fully locked gift, first
+unlock with vesting remaining and unchanged counters, and final zero remainder
+with frozen-share cumulative counters.
 
 An R1 assertion is delayed until R2 evidence is attempted, so an isolated R1
 assertion does not erase R2 command evidence. A cluster/bootstrap/fixture error
