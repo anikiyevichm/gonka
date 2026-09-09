@@ -753,6 +753,11 @@ data class DockerGroup(
         var prepared = false
         repeat(10) {
             try {
+                // java.io.File uses the Windows provider's mkdirs path and
+                // is a useful fallback when NIO sees a transient bind mount.
+                mappingsDir.toFile().mkdirs()
+                filesDir.toFile().mkdirs()
+                inferenceDir.toFile().mkdirs()
                 Files.createDirectories(mappingsDir)
                 Files.createDirectories(filesDir)
                 Files.createDirectories(inferenceDir)
