@@ -3,6 +3,7 @@ package a8faults
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
@@ -26,6 +27,17 @@ func fixture(t *testing.T) (Plan, sdk.AccAddress, vm.QueryRequest) {
 	data, err := proto.Marshal(&types.QueryEpochPerformanceSummaryByParticipantRequest{ParticipantId: host, EpochIndex: 5})
 	require.NoError(t, err)
 	return Plan{Version: 1, ChainID: "test-chain", Rules: []Rule{r}}, caller, vm.QueryRequest{Grpc: &vm.GrpcQuery{Path: Summary, Data: data}}
+}
+
+func requireSystemErrorField(t *testing.T, systemErr *vm.SystemError, fieldName string) {
+	t.Helper()
+	require.NotNil(t, systemErr)
+	tv := reflect.ValueOf(systemErr)
+	require.Equal(t, reflect.Ptr, tv.Kind())
+	v := tv.Elem()
+	f := v.FieldByName(fieldName)
+	require.True(t, f.IsValid(), "missing system error field %s", fieldName)
+	require.NotZero(t, f.Interface())
 }
 
 func TestIsolationRecoveryAndImmutablePlan(t *testing.T) {
@@ -114,6 +126,27 @@ func TestPayloadsAndGoWasmBoundary(t *testing.T) {
 	}
 }
 
+func TestToQuerierResultClassifiesVMSystemErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		err   error
+		field string
+	}{
+		{name: "InvalidResponse", err: vm.InvalidResponse{}, field: "InvalidResponse"},
+		{name: "InvalidRequest", err: vm.InvalidRequest{}, field: "InvalidRequest"},
+		{name: "Unknown", err: vm.Unknown{}, field: "Unknown"},
+		{name: "NoSuchContract", err: vm.NoSuchContract{}, field: "NoSuchContract"},
+		{name: "NoSuchCode", err: vm.NoSuchCode{}, field: "NoSuchCode"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := vm.ToQuerierResult(nil, tc.err)
+			require.Nil(t, result.Ok)
+			require.NotNil(t, result.Err)
+			requireSystemErrorField(t, result.Err, tc.field)
+		})
+	}
+}
+
 func TestRoutingAndEpochScopes(t *testing.T) {
 	p, caller, _ := fixture(t)
 	for _, route := range []string{Routing, CurrentEpoch} {
@@ -152,7 +185,9 @@ func TestStrictPlanValidation(t *testing.T) {
 	}
 	for _, change := range []func(*Rule){
 		func(r *Rule) { r.Deal = "*" }, func(r *Rule) { r.Host = "*" }, func(r *Rule) { r.UntilHeight = r.FromHeight },
-		func(r *Rule) { r.Kind = "invalid_response_envelope" }, func(r *Rule) { r.Route = "/other" },
+		func(r *Rule) { r.Kind = "invalid_response_envelope" }, func(r *Rule) { r.Kind = "invalid_request" },
+		func(r *Rule) { r.Kind = "unknown" }, func(r *Rule) { r.Kind = "no_such_contract" },
+		func(r *Rule) { r.Kind = "no_such_code" }, func(r *Rule) { r.Route = "/other" },
 		func(r *Rule) { r.Kind = "wrong_host"; r.OtherHost = r.Host },
 	} {
 		bad := p
