@@ -28,12 +28,12 @@ import java.util.concurrent.TimeUnit
 @Timeout(value = 35, unit = TimeUnit.MINUTES)
 class MarketplaceContractAcceptanceTests : TestermintTest() {
     @Test
-    @Timeout(value = 45, unit = TimeUnit.MINUTES)
+    @Timeout(value = 65, unit = TimeUnit.MINUTES)
     fun `marketplace package C proves query faults and recovery`() {
         // The immutable C binary is built by run-live before this cluster starts.
         // Longer explicit test epochs leave room for the finite E+2/E+3 batches.
         requiredEnv("A8_C_BINARY")
-        val config = fastMarketplaceConfig(enableCQueryFaults = true, epochLength = 60L)
+        val config = fastMarketplaceConfig(enableCQueryFaults = true, epochLength = 75L)
         val (cluster, genesis) = initCluster(config = config, reboot = true)
         cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
         fun phase(name: String, vararg extra: String) = runHarness(
@@ -83,9 +83,12 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         genesis.node.waitForNextBlock(2)
         phase("routing")
         while (genesis.getEpochData().latestEpoch.index < targetEpoch + 2) genesis.waitForNextEpoch()
-        phase("early")
+        // R5 must recover BEFORE the E+3 deadline. Do it before spending the
+        // rest of E+2 on the independent R4 matrix (whose faults remain active).
+        phase("early-r5")
         phase("recover-before")
         genesis.node.waitForNextBlock(2)
+        phase("early-r4")
         while (genesis.getEpochData().latestEpoch.index < targetEpoch + 3) genesis.waitForNextEpoch()
         phase("late")
         phase("recover-after")
@@ -613,7 +616,12 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
         while (genesis.getEpochData().latestEpoch.index < targetEpoch + 2) genesis.waitForNextEpoch()
         genesis.node.waitForNextBlock(2)
 
-        runHarness("bank-release-fault-plan", "--context", requiredEnv("A8_CONTEXT"), "--name", "bootstrap")
+        // Governance may cross an epoch. Freeze the payout calculation only
+        // after BOTH original vesting tranches are liquid, and prove it natively.
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch + 3) genesis.waitForNextEpoch()
+        genesis.waitForStage(EpochStage.CLAIM_REWARDS, offset = 2)
+        runHarness("bank-release-fault-plan", "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "bootstrap", "--require-fully-vested")
         val phases = JsonParser.parseString(File(requiredEnv("A8_CONTEXT")).readText())
             .asJsonObject["phases"].asJsonArray
         val plan = phases.last { it.asJsonObject["name"].asString == "native_bank_release_fault_plan" }
