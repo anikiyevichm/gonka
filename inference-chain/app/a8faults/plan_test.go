@@ -143,6 +143,15 @@ func TestToQuerierResultClassifiesVMSystemErrors(t *testing.T) {
 			require.Nil(t, result.Ok)
 			require.NotNil(t, result.Err)
 			requireSystemErrorField(t, result.Err, tc.field)
+			// Go classification/serialization only; the compiled-Wasm ABI
+			// decoder is exercised separately by test_wasm_query_boundary.mjs.
+			encoded, err := json.Marshal(result)
+			require.NoError(t, err)
+			var decoded vm.QuerierResult
+			require.NoError(t, json.Unmarshal(encoded, &decoded))
+			require.Nil(t, decoded.Ok)
+			requireSystemErrorField(t, decoded.Err, tc.field)
+
 		})
 	}
 }

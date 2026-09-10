@@ -179,6 +179,48 @@ class MarketplaceContractAcceptanceTests : TestermintTest() {
     }
 
     @Test
+    fun `marketplace funded lock succeeds exactly at E`() {
+        val config = fastMarketplaceConfig()
+        val (cluster, genesis) = initCluster(config = config, reboot = true)
+        cluster.allPairs.forEach { it.waitForMlNodesToLoad() }
+
+        val targetEpoch = genesis.getEpochData().latestEpoch.index + 3
+        // bootstrap deliberately occupies join1/E. Register a separate native
+        // Host so this focused Deal cannot conflict with that permanent pair.
+        val hostKey = createInactiveParticipant(genesis, "a8-lock-exact-e")
+        runHarness(
+            "bootstrap",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--run-id", requiredEnv("A8_RUN_ID"),
+            "--target-epoch", targetEpoch.toString(),
+            "--deal-wasm", requiredEnv("A8_DEAL_WASM"),
+            "--factory-wasm", requiredEnv("A8_FACTORY_WASM"),
+            "--cw20-wasm", requiredEnv("A8_CW20_WASM"),
+            "--caller-wasm", requiredEnv("A8_CALLER_WASM"),
+        )
+        // Host=the dedicated participant, Buyer=join2, and Lock fee payer=genesis
+        // are distinct addresses.
+        prepareDeal(
+            "lock-exact-e",
+            targetEpoch,
+            funded = true,
+            hostNode = "genesis-node",
+            hostKey = hostKey,
+        )
+
+        genesis.markNeedsReboot()
+        logSection("Leave the funded Deal unlocked until its exact E boundary")
+        while (genesis.getEpochData().latestEpoch.index < targetEpoch) {
+            genesis.waitForNextEpoch()
+        }
+        runHarness(
+            "lock-exact-e-scenario",
+            "--context", requiredEnv("A8_CONTEXT"),
+            "--name", "lock-exact-e",
+        )
+    }
+
+    @Test
     fun `marketplace funded lock succeeds exactly at E plus 4`() {
         val config = fastMarketplaceConfig()
         val (cluster, genesis) = initCluster(config = config, reboot = true)

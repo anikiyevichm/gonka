@@ -3,7 +3,6 @@ package app
 import (
 	"bytes"
 	"errors"
-	"reflect"
 	"testing"
 
 	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
@@ -176,24 +175,10 @@ func a8SummaryFaultDecorator(
 					EpochIndex: selector.Epoch, ParticipantId: "not-a-gonka-address",
 				},
 			})
-		case a8InvalidJSON:
-			return nil, wasmvmtypes.InvalidResponse{}
-	default:
-		panic("unknown A8 fault kind")
-	}
+		default:
+			panic("unknown A8 fault kind")
+		}
 	})
-}
-
-func a8RequireSystemErrorField(t *testing.T, systemErr *wasmvmtypes.SystemError, fieldName string) {
-	t.Helper()
-	tv := reflect.ValueOf(systemErr)
-	require.NotNil(t, systemErr)
-	require.True(t, tv.IsValid())
-	require.Equal(t, reflect.Ptr, tv.Kind())
-	v := tv.Elem()
-	f := v.FieldByName(fieldName)
-	require.True(t, f.IsValid(), "missing system error field %s", fieldName)
-	require.NotZero(t, f.Interface())
 }
 
 func TestA8SummaryFaultSelectorIsNarrowAndDeterministic(t *testing.T) {
@@ -330,7 +315,7 @@ func TestA8SummaryFaultDecoratorProducesOnlyItsDeclaredLayer(t *testing.T) {
 
 	for _, kind := range []a8FaultKind{
 		a8HandlerError, a8Unsupported, a8BadProto, a8Oversized,
-		a8MissingNested, a8WrongHost, a8WrongEpoch, a8InvalidParticipant, a8InvalidJSON,
+		a8MissingNested, a8WrongHost, a8WrongEpoch, a8InvalidParticipant,
 	} {
 		t.Run(string(kind), func(t *testing.T) {
 			provider := a8SummaryFaultDecorator(a8SummaryFaultSelector{
@@ -345,12 +330,7 @@ func TestA8SummaryFaultDecoratorProducesOnlyItsDeclaredLayer(t *testing.T) {
 				require.Nil(t, result.Err)
 			case a8SystemResultLayer:
 				require.NotNil(t, result.Err)
-				if kind == a8Unsupported {
-					require.NotNil(t, result.Err.UnsupportedRequest)
-				}
-				if kind == a8InvalidJSON {
-					a8RequireSystemErrorField(t, result.Err, "InvalidResponse")
-				}
+				require.NotNil(t, result.Err.UnsupportedRequest)
 			case a8RawResponseLayer:
 				require.NotNil(t, result.Ok)
 				require.Empty(t, result.Ok.Err)
