@@ -1,5 +1,19 @@
 # A8 package B Gonka handoff — PARTIAL-PREPARED
 
+## Merge handoff status
+
+The agreed acceptance checks are complete at their recorded proof levels;
+no additional live run is required for these MRs. Marketplace's
+`docs/reviews/a8-final-coverage-matrix.md` is the current status authority.
+Native exact-E PASS, 73 reviewed C cases, Go JSON and synthetic Wasm ABI PASS,
+and two named contract tests with full logs are preserved in Marketplace evidence.
+This does not claim production Go/libwasmvm/keeper fault reachability or a
+successful historical C JUnit after timeout. Unified runner is separate follow-up.
+The preparation/run instructions and pending labels below are historical;
+use the current matrix for acceptance status, not those old TODOs.
+
+
+
 Base/head before this package: `bbde35c87757d7519962d67424f16b5613f1fc36`.
 Branch: `test/a8-package-b`; isolated checkout: `a8-package-b-gonka`.
 

@@ -1,5 +1,19 @@
 # A8 package A handoff — Gonka Testermint harness
 
+## Merge handoff status
+
+The agreed acceptance checks are complete at their recorded proof levels;
+no additional live run is required for these MRs. Marketplace's
+`docs/reviews/a8-final-coverage-matrix.md` is the current status authority.
+Native exact-E PASS, 73 reviewed C cases, Go JSON and synthetic Wasm ABI PASS,
+and two named contract tests with full logs are preserved in Marketplace evidence.
+This does not claim production Go/libwasmvm/keeper fault reachability or a
+successful historical C JUnit after timeout. Unified runner is separate follow-up.
+The preparation/run instructions and pending labels below are historical;
+use the current matrix for acceptance status, not those old TODOs.
+
+
+
 Status: **PREPARED** (not a live PASS).
 
 Base Marketplace SHA: `6b5df7fbdebdc7504a86a9be2c5631288f132f60`.
